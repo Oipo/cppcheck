@@ -92,6 +92,7 @@ SymbolDatabase::SymbolDatabase(Tokenizer& tokenizer)
     createSymbolDatabaseEscapeFunctions();
     createSymbolDatabaseIncompleteVars();
     createSymbolDatabaseExprIds();
+    createSymbolDatabaseScopeHasGoto();
     debugSymbolDatabase();
 }
 
@@ -1714,6 +1715,16 @@ namespace {
             }
             tok = tok->astParent();
         }
+    }
+}
+
+void SymbolDatabase::createSymbolDatabaseScopeHasGoto()
+{
+    for (const Token *tok = mTokenizer.list.front(); tok; tok = tok->next()) {
+        if (tok->str() != "goto")
+            continue;
+        for (const Scope *scope = tok->scope(); scope && !scope->hasGoto; scope = scope->nestedIn)
+            const_cast<Scope *>(scope)->hasGoto = true;
     }
 }
 

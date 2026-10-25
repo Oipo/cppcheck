@@ -1062,6 +1062,7 @@ public:
     Type* definedType{};
     std::map<std::string, Type*> definedTypesMap;
     std::vector<const Token *> bodyStartList;
+    bool hasGoto{}; ///< there is a goto in the body, or in a nested scope
 
     // function specific fields
     const Scope* functionOf{}; ///< scope this function belongs to
@@ -1441,6 +1442,7 @@ public:
 
     void clangSetVariables(const std::vector<const Variable *> &vars);
     void createSymbolDatabaseExprIds();
+    void createSymbolDatabaseScopeHasGoto();
 
     /* returns the opening { if tok points to enum */
     static const Token* isEnumDefinition(const Token* tok);

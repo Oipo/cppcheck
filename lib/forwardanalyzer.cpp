@@ -347,6 +347,9 @@ namespace {
         }
 
         static bool hasGoto(const Token* endBlock) {
+            const Scope* scope = endBlock->scope();
+            if (scope && scope->bodyEnd == endBlock && scope->bodyStartList.size() == 1)
+                return scope->hasGoto;
             return Token::findsimplematch(endBlock->link(), "goto", endBlock);
         }
 
@@ -760,13 +763,13 @@ namespace {
                         // Traverse condition
                         if (updateRecursive(condTok) == Progress::Break)
                             return Break();
+                        const bool hasElse = Token::simpleMatch(endBlock, "} else {");
                         Branch thenBranch{endBlock};
-                        Branch elseBranch{endBlock->tokAt(2) ? endBlock->linkAt(2) : nullptr};
+                        Branch elseBranch{hasElse ? endBlock->linkAt(2) : nullptr};
                         // Check if condition is true or false
                         std::tie(thenBranch.check, elseBranch.check) = evalCond(condTok);
                         if (!thenBranch.check && !elseBranch.check && stopOnCondition(condTok) && stopUpdates())
                             return Break(Analyzer::Terminate::Conditional);
-                        const bool hasElse = Token::simpleMatch(endBlock, "} else {");
                         tok = hasElse ? endBlock->linkAt(2) : endBlock;
                         if (thenBranch.check) {
                             if (updateTakenBranch(thenBranch, hasElse ? elseBranch.endBlock : nullptr, condTok, depth) ==

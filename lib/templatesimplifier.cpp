@@ -35,6 +35,7 @@
 #include <memory>
 #include <stack>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 
 static Token *skipRequires(Token *tok)
@@ -3970,23 +3971,20 @@ void TemplateSimplifier::simplifyTemplates(const std::time_t maxtime)
 
         std::set<std::string> expandedtemplates;
 
+        // get specializations..
+        std::unordered_map<std::string, std::list<const Token *>> specializationsByName;
+        for (const TokenAndName& decl : mTemplateDeclarations) {
+            if (!decl.isAlias() && !decl.isFriend())
+                specializationsByName[decl.fullName()].push_back(decl.nameToken());
+        }
+
         for (auto iter1 = mTemplateDeclarations.crbegin(); iter1 != mTemplateDeclarations.crend(); ++iter1) {
             if (iter1->isAlias() || iter1->isFriend())
                 continue;
 
-            // get specializations..
-            std::list<const Token *> specializations;
-            for (auto iter2 = mTemplateDeclarations.cbegin(); iter2 != mTemplateDeclarations.cend(); ++iter2) {
-                if (iter2->isAlias() || iter2->isFriend())
-                    continue;
-
-                if (iter1->fullName() == iter2->fullName())
-                    specializations.push_back(iter2->nameToken());
-            }
-
             const bool instantiated = simplifyTemplateInstantiations(
                 *iter1,
-                specializations,
+                specializationsByName.at(iter1->fullName()),
                 maxtime,
                 expandedtemplates);
             if (instantiated) {

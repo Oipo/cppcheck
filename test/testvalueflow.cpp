@@ -2751,6 +2751,27 @@ private:
                "}\n";
         ASSERT_EQUALS(false, testValueOfX(code, 7U, 0));
 
+        // a goto after an if without else must not stop the value
+        code = "int f(int a, int b, int c) {\n"
+               "    int x = 1;\n"
+               "    if (c) {\n"
+               "        if (b) {\n"
+               "            x = 0;\n"
+               "            if (a) {\n"
+               "                dostuff();\n"
+               "            }\n"
+               "        }\n"
+               "    }\n"
+               "    return 10 / x;\n"
+               "}\n"
+               "void g(int a) {\n"
+               "    if (a)\n"
+               "        goto end;\n"
+               "end:\n"
+               "    ;\n"
+               "}\n";
+        ASSERT_EQUALS(true, testValueOfX(code, 11U, 0));
+
         code = "void f() {\n" // #5752 - FP
                "    int *x = 0;\n"
                "    if (x && *x == 123) {\n"

@@ -5354,6 +5354,30 @@ static Token * matchMemberFunctionName(const Member &func, const std::list<Scope
     return Token::Match(tok, "~| %name% (") ? tok : nullptr;
 }
 
+using MatchedMembers = std::map<std::vector<std::string>, std::vector<Token *>>;
+
+// Which members match only depends on the scope names, and the same scope can be opened many
+// times (namespaces, specializations): match the members once per scope and remember them.
+static const std::vector<Token *> &matchMembersForScope(MatchedMembers &matched,
+                                                        const MembersByScopeName &index,
+                                                        const std::list<ScopeInfo2> &scopeInfo,
+                                                        Token * (*matchMember)(const Member &, const std::list<ScopeInfo2> &))
+{
+    std::vector<std::string> names;
+    std::transform(scopeInfo.cbegin(), scopeInfo.cend(), std::back_inserter(names), [](const ScopeInfo2 &si) {
+        return si.name;
+    });
+    const auto inserted = matched.emplace(std::move(names), std::vector<Token *>());
+    std::vector<Token *> &tokens = inserted.first->second;
+    if (inserted.second) {
+        for (const Member *member : membersForScope(index, scopeInfo)) {
+            if (Token *tok = matchMember(*member, scopeInfo))
+                tokens.push_back(tok);
+        }
+    }
+    return tokens;
+}
+
 template<typename T>
 static T* skipInitializerList(T* tok)
 {
@@ -5451,6 +5475,8 @@ void Tokenizer::setVarIdPass2()
 
     const MembersByScopeName memberFunctionsByScopeName = indexMembersByScopeName(allMemberFunctions);
     const MembersByScopeName memberVarsByScopeName = indexMembersByScopeName(allMemberVars);
+    MatchedMembers matchedMemberFunctions;
+    MatchedMembers matchedMemberVars;
 
     std::list<ScopeInfo2> scopeInfo;
 
@@ -5568,10 +5594,7 @@ void Tokenizer::setVarIdPass2()
             continue;
 
         // Member variables
-        for (const Member *var : membersForScope(memberVarsByScopeName, scopeInfo)) {
-            Token *tok2 = matchMemberVarName(*var, scopeInfo);
-            if (!tok2)
-                continue;
+        for (Token *tok2 : matchMembersForScope(matchedMemberVars, memberVarsByScopeName, scopeInfo, matchMemberVarName)) {
             if (tok2->varId() == 0)
                 tok2->varId(thisClassVars[tok2->str()]);
         }
@@ -5580,11 +5603,7 @@ void Tokenizer::setVarIdPass2()
             continue;
 
         // Set variable ids in member functions for this class..
-        for (const Member *func : membersForScope(memberFunctionsByScopeName, scopeInfo)) {
-            Token *tok2 = matchMemberFunctionName(*func, scopeInfo);
-            if (!tok2)
-                continue;
-
+        for (Token *tok2 : matchMembersForScope(matchedMemberFunctions, memberFunctionsByScopeName, scopeInfo, matchMemberFunctionName)) {
             if (tok2->str() == "~")
                 tok2 = tok2->linkAt(2);
             else
@@ -11504,18 +11523,24 @@ void Tokenizer::simplifyAlignedStorage()
 void Tokenizer::setDirectives(std::list<Directive> directives)
 {
     mDirectives = std::move(directives);
+    mIfdefLines.clear();
+    for (const Directive &d : mDirectives) {
+        if (startsWith(d.str, "#if"))
+            mIfdefLines[d.file].push_back(d.linenr);
+    }
+    for (auto &f : mIfdefLines)
+        std::sort(f.second.begin(), f.second.end());
 }
 
 bool Tokenizer::hasIfdef(const Token *start, const Token *end) const
 {
-    const auto& directives = mDirectives;
-    return std::any_of(directives.cbegin(), directives.cend(), [&](const Directive& d) {
-        return startsWith(d.str, "#if") &&
-               d.linenr >= start->linenr() &&
-               d.linenr <= end->linenr() &&
-               start->fileIndex() < list.getFiles().size() &&
-               d.file == list.getFiles()[start->fileIndex()];
-    });
+    if (start->fileIndex() >= list.getFiles().size())
+        return false;
+    const auto f = mIfdefLines.find(list.getFiles()[start->fileIndex()]);
+    if (f == mIfdefLines.cend())
+        return false;
+    const auto it = std::lower_bound(f->second.cbegin(), f->second.cend(), static_cast<unsigned int>(start->linenr()));
+    return it != f->second.cend() && *it <= static_cast<unsigned int>(end->linenr());
 }
 
 bool Tokenizer::isPacked(const Token * bodyStart) const

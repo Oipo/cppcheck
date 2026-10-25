@@ -712,6 +712,9 @@ private:
 
     std::list<Directive> mDirectives;
 
+    /** sorted line numbers of the \#if directives (\#if, \#ifdef, \#ifndef) of each file */
+    std::map<std::string, std::vector<unsigned int>> mIfdefLines;
+
     /** variable count */
     nonneg int mVarId{};
 
