@@ -3845,6 +3845,78 @@ static void valueFlowSymbolicInfer(const SymbolDatabase& symboldatabase, const S
     }
 }
 
+/** Sets the values of a const variable on a token that is the variable, an iterator of it, a reference to it or has a symbolic value of it */
+template<class ContainerOfValue>
+static void valueFlowForwardConstToken(Token* tok,
+                                       const Variable* var,
+                                       const ContainerOfValue& values,
+                                       bool hasContainerSizeValue,
+                                       const Settings& settings)
+{
+    if (tok->varId() == var->declarationId()) {
+        for (const ValueFlow::Value& value : values)
+            setTokenValue(tok, value, settings);
+        return;
+    }
+    // Add the container size to iterators of the container (mirrors ContainerExpressionAnalyzer::match)
+    if (hasContainerSizeValue && isIteratorOf(tok, var->declarationId())) {
+        for (const ValueFlow::Value& value : values) {
+            if (!value.isContainerSizeValue())
+                continue;
+            ValueFlow::Value sizeValue = value;
+            if (!sizeValue.container)
+                sizeValue.container = var->nameToken();
+            setTokenValue(tok, std::move(sizeValue), settings);
+        }
+        return;
+    }
+    // Follow references
+    const auto& refs = tok->refs();
+    auto it = std::find_if(refs.cbegin(), refs.cend(), [&](const ReferenceToken& ref) {
+        return ref.token->varId() == var->declarationId();
+    });
+    if (it != refs.end()) {
+        for (ValueFlow::Value value : values) {
+            if (refs.size() > 1)
+                value.setInconclusive();
+            value.errorPath.insert(value.errorPath.end(), it->errors.cbegin(), it->errors.cend());
+            setTokenValue(tok, std::move(value), settings);
+        }
+        return;
+    }
+    // Follow symbolic values
+    for (const ValueFlow::Value& v : tok->values()) {
+        if (!v.isSymbolicValue())
+            continue;
+        if (!v.tokvalue)
+            continue;
+        if (v.tokvalue->varId() != var->declarationId())
+            continue;
+        for (ValueFlow::Value value : values) {
+            if (!v.isKnown() && value.isImpossible())
+                continue;
+            if (v.intvalue != 0) {
+                if (!value.isIntValue())
+                    continue;
+                value.intvalue += v.intvalue;
+            }
+            if (!value.isImpossible())
+                value.valueKind = v.valueKind;
+            value.bound = v.bound;
+            value.errorPath.insert(value.errorPath.end(), v.errorPath.cbegin(), v.errorPath.cend());
+            setTokenValue(tok, std::move(value), settings);
+        }
+    }
+}
+
+template<class ContainerOfValue>
+static bool hasContainerSizeValue(const ContainerOfValue& values)
+{
+    return std::any_of(values.begin(), values.end(), [](const ValueFlow::Value& value) {
+        return value.isContainerSizeValue();
+    });
+}
+
 /**
  * @throws InternalError thrown if start token precedes end token
  */
@@ -3858,67 +3930,9 @@ static void valueFlowForwardConst(Token* start,
 {
     if (!precedes(start, end))
         throw InternalError(var->nameToken(), "valueFlowForwardConst: start token does not precede the end token.");
-    const bool hasContainerSizeValue = std::any_of(values.begin(), values.end(), [](const ValueFlow::Value& value) {
-        return value.isContainerSizeValue();
-    });
-    for (Token* tok = start; tok != end; tok = tok->next()) {
-        if (tok->varId() == var->declarationId()) {
-            for (const ValueFlow::Value& value : values)
-                setTokenValue(tok, value, settings);
-        } else {
-            [&] {
-                // Add the container size to iterators of the container (mirrors ContainerExpressionAnalyzer::match)
-                if (hasContainerSizeValue && isIteratorOf(tok, var->declarationId())) {
-                    for (const ValueFlow::Value& value : values) {
-                        if (!value.isContainerSizeValue())
-                            continue;
-                        ValueFlow::Value sizeValue = value;
-                        if (!sizeValue.container)
-                            sizeValue.container = var->nameToken();
-                        setTokenValue(tok, std::move(sizeValue), settings);
-                    }
-                    return;
-                }
-                // Follow references
-                const auto& refs = tok->refs();
-                auto it = std::find_if(refs.cbegin(), refs.cend(), [&](const ReferenceToken& ref) {
-                    return ref.token->varId() == var->declarationId();
-                });
-                if (it != refs.end()) {
-                    for (ValueFlow::Value value : values) {
-                        if (refs.size() > 1)
-                            value.setInconclusive();
-                        value.errorPath.insert(value.errorPath.end(), it->errors.cbegin(), it->errors.cend());
-                        setTokenValue(tok, std::move(value), settings);
-                    }
-                    return;
-                }
-                // Follow symbolic values
-                for (const ValueFlow::Value& v : tok->values()) {
-                    if (!v.isSymbolicValue())
-                        continue;
-                    if (!v.tokvalue)
-                        continue;
-                    if (v.tokvalue->varId() != var->declarationId())
-                        continue;
-                    for (ValueFlow::Value value : values) {
-                        if (!v.isKnown() && value.isImpossible())
-                            continue;
-                        if (v.intvalue != 0) {
-                            if (!value.isIntValue())
-                                continue;
-                            value.intvalue += v.intvalue;
-                        }
-                        if (!value.isImpossible())
-                            value.valueKind = v.valueKind;
-                        value.bound = v.bound;
-                        value.errorPath.insert(value.errorPath.end(), v.errorPath.cbegin(), v.errorPath.cend());
-                        setTokenValue(tok, std::move(value), settings);
-                    }
-                }
-            }();
-        }
-    }
+    const bool containerSize = hasContainerSizeValue(values);
+    for (Token* tok = start; tok != end; tok = tok->next())
+        valueFlowForwardConstToken(tok, var, values, containerSize, settings);
 }
 
 static void valueFlowForwardConst(Token* start,
@@ -3928,6 +3942,113 @@ static void valueFlowForwardConst(Token* start,
                                   const Settings& settings)
 {
     valueFlowForwardConst(start, end, var, values, settings, 0);
+}
+
+namespace {
+    /**
+     * The tokens on which valueFlowForwardConstToken() can set the values of a variable, by declaration id:
+     * the variable, a reference to it, an iterator with an iterator value of it and a token with a symbolic
+     * value of it. References do not depend on values. The index is only valid while no iterator values
+     * and symbolic values are added, as in valueFlowContainerSize().
+     */
+    class ConstForwardTokens {
+    public:
+        explicit ConstForwardTokens(const TokenList& tokenlist) {
+            for (auto* tok = const_cast<Token*>(tokenlist.front()); tok; tok = tok->next()) {
+                if (tok->varId() != 0)
+                    add(tok->varId(), tok);
+                // only these tokens have other references than the token itself (see followAllReferences())
+                const Variable* var = tok->variable();
+                if ((var && (var->isReference() || var->isRValueReference())) || tok->str() == "?" ||
+                    (tok->previous() && tok->previous()->function() && Token::Match(tok->previous(), "%name% ("))) {
+                    for (const ReferenceToken& ref : tok->refs()) {
+                        if (ref.token->varId() != 0)
+                            add(ref.token->varId(), tok);
+                    }
+                }
+                const bool iterator = astIsIterator(tok);
+                for (const ValueFlow::Value& v : tok->values()) {
+                    if (iterator && v.isIteratorValue() && v.container && v.container->exprId() != 0)
+                        add(v.container->exprId(), tok);
+                    else if (v.isSymbolicValue() && v.tokvalue && v.tokvalue->varId() != 0)
+                        add(v.tokvalue->varId(), tok);
+                }
+            }
+        }
+
+        using Range = std::pair<std::vector<Token*>::const_iterator, std::vector<Token*>::const_iterator>;
+
+        /** The tokens of a variable from start to end (not included), in token order */
+        Range range(nonneg int declarationId, const Token* start, const Token* end) const {
+            const auto it = mTokens.find(declarationId);
+            if (it == mTokens.end())
+                return {mNone.cend(), mNone.cend()};
+            const auto before = [](const Token* tok, nonneg int index) {
+                return tok->index() < index;
+            };
+            const auto first = std::lower_bound(it->second.cbegin(), it->second.cend(), start->index(), before);
+            return {first, std::lower_bound(first, it->second.cend(), end->index(), before)};
+        }
+
+    private:
+        void add(nonneg int id, Token* tok) {
+            std::vector<Token*>& tokens = mTokens[id];
+            // a token can refer to a variable more than once, as in `b ? v : v`
+            if (tokens.empty() || tokens.back() != tok)
+                tokens.push_back(tok);
+        }
+
+        std::unordered_map<nonneg int, std::vector<Token*>> mTokens;
+        const std::vector<Token*> mNone;
+    };
+}
+
+#ifndef NDEBUG
+// Can valueFlowForwardConstToken() set a value of the variable on the token?
+static bool isConstForwardToken(const Token* tok, nonneg int declarationId)
+{
+    if (tok->varId() == declarationId || isIteratorOf(tok, declarationId))
+        return true;
+    if (std::any_of(tok->refs().cbegin(), tok->refs().cend(), [&](const ReferenceToken& ref) {
+        return ref.token->varId() == declarationId;
+    }))
+        return true;
+    return std::any_of(tok->values().cbegin(), tok->values().cend(), [&](const ValueFlow::Value& v) {
+        return v.isSymbolicValue() && v.tokvalue && v.tokvalue->varId() == declarationId;
+    });
+}
+#endif
+
+/**
+ * Same as valueFlowForwardConst(), but only the tokens of the variable in the index are looked at
+ * @throws InternalError thrown if start token precedes end token
+ */
+template<class ContainerOfValue>
+static void valueFlowForwardConst(Token* start,
+                                  const Token* end,
+                                  const Variable* var,
+                                  const ContainerOfValue& values,
+                                  const Settings& settings,
+                                  const ConstForwardTokens& constForwardTokens)
+{
+    if (!precedes(start, end))
+        throw InternalError(var->nameToken(), "valueFlowForwardConst: start token does not precede the end token.");
+    const bool containerSize = hasContainerSizeValue(values);
+    const auto tokens = constForwardTokens.range(var->declarationId(), start, end);
+#ifndef NDEBUG
+    {
+        auto it = tokens.first;
+        for (const Token* tok = start; tok != end; tok = tok->next()) {
+            if (it != tokens.second && *it == tok)
+                ++it;
+            else
+                assert(!isConstForwardToken(tok, var->declarationId()));
+        }
+        assert(it == tokens.second);
+    }
+#endif
+    for (auto it = tokens.first; it != tokens.second; ++it)
+        valueFlowForwardConstToken(*it, var, values, containerSize, settings);
 }
 
 static ValueFlow::Value::Bound findVarBound(const Variable* var,
@@ -6725,6 +6846,7 @@ static void valueFlowContainerSize(const TokenList& tokenlist,
                                    const Settings& settings,
                                    const std::set<const Scope*>& skippedFunctions)
 {
+    std::unique_ptr<ConstForwardTokens> constForwardTokens; // built when the first const container is found
     // declaration
     for (const Variable *var : symboldatabase.variableList()) {
         if (!var)
@@ -6787,7 +6909,10 @@ static void valueFlowContainerSize(const TokenList& tokenlist,
         }
 
         if (constSize) {
-            valueFlowForwardConst(nameToken->next(), var->scope()->bodyEnd, var, values, settings);
+            // the scope of a variable at namespace level is the rest of the file, so only the tokens of the variable are looked at
+            if (!constForwardTokens)
+                constForwardTokens.reset(new ConstForwardTokens(tokenlist));
+            valueFlowForwardConst(nameToken->next(), var->scope()->bodyEnd, var, values, settings, *constForwardTokens);
             continue;
         }
 

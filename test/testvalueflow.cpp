@@ -131,6 +131,7 @@ private:
 
         TEST_CASE(valueFlowContainerSize);
         TEST_CASE(valueFlowContainerSizeIterator);
+        TEST_CASE(valueFlowContainerSizeConst);
         TEST_CASE(valueFlowContainerElement);
 
         TEST_CASE(valueFlowDynamicBufferSize);
@@ -7920,6 +7921,82 @@ private:
             "",
             isKnownContainerSizeValue(tokenValues(code, "it !=", ValueFlow::Value::ValueType::CONTAINER_SIZE), 3));
         ASSERT_EQUALS("v", containerOfSizeValue(code, "it !="));
+    }
+
+    void valueFlowContainerSizeConst() {
+        const char* code;
+        std::list<ValueFlow::Value> values;
+
+        // valueFlowForwardConst: the size of a const container is set on a reference to it
+        code = "void f() {\n"
+               "    const std::vector<int> v{1, 2, 3};\n"
+               "    const std::vector<int>& r = v;\n"
+               "    if (r.empty()) {}\n"
+               "}\n";
+        ASSERT_EQUALS(
+            "",
+            isKnownContainerSizeValue(tokenValues(code, "r .", ValueFlow::Value::ValueType::CONTAINER_SIZE), 3));
+
+        code = "namespace N {\n"
+               "    std::array<uint8_t, 256> a;\n"
+               "    uint32_t f(const char* c) {\n"
+               "        constexpr auto& t = a;\n"
+               "        const uint8_t arr[2]{t[uint8_t(c[1])], t[uint8_t(c[0])]};\n"
+               "        return arr[0];\n"
+               "    }\n"
+               "}\n";
+        ASSERT_EQUALS(
+            "",
+            isKnownContainerSizeValue(tokenValues(code, "t [ uint8_t ( c [ 1", ValueFlow::Value::ValueType::CONTAINER_SIZE), 256));
+        ASSERT_EQUALS(
+            "",
+            isKnownContainerSizeValue(tokenValues(code, "t [ uint8_t ( c [ 0", ValueFlow::Value::ValueType::CONTAINER_SIZE), 256));
+
+        // ..on a conditional expression, inconclusive when it refers to more than one container
+        code = "void f(bool b) {\n"
+               "    const std::vector<int> v{1, 2, 3};\n"
+               "    const std::vector<int> w{1, 2};\n"
+               "    if ((b ? v : w).empty()) {}\n"
+               "}\n";
+        values = tokenValues(code, "?", ValueFlow::Value::ValueType::CONTAINER_SIZE);
+        ASSERT_EQUALS(2, values.size());
+        ASSERT_EQUALS(true, std::all_of(values.cbegin(), values.cend(), std::mem_fn(&ValueFlow::Value::isInconclusive)));
+
+        code = "void f(bool b) {\n"
+               "    const std::vector<int> v{1, 2, 3};\n"
+               "    if ((b ? v : v).empty()) {}\n"
+               "}\n";
+        ASSERT_EQUALS(
+            "",
+            isInconclusiveContainerSizeValue(tokenValues(code, "?", ValueFlow::Value::ValueType::CONTAINER_SIZE), 3));
+
+        // ..on a function call that returns a reference to it
+        code = "const std::vector<int>& g(const std::vector<int>& x) { return x; }\n"
+               "void f() {\n"
+               "    const std::vector<int> v{1, 2, 3};\n"
+               "    if (g(v).empty()) {}\n"
+               "}\n";
+        ASSERT_EQUALS(
+            "",
+            isKnownContainerSizeValue(tokenValues(code, "( v ) .", ValueFlow::Value::ValueType::CONTAINER_SIZE), 3));
+
+        // ..on a copy of it, which has a symbolic value of it
+        code = "void f() {\n"
+               "    const std::vector<int> v{1, 2, 3};\n"
+               "    std::vector<int> u = v;\n"
+               "    if (u.empty()) {}\n"
+               "}\n";
+        ASSERT_EQUALS(
+            "",
+            isKnownContainerSizeValue(tokenValues(code, "u .", ValueFlow::Value::ValueType::CONTAINER_SIZE), 3));
+
+        // the static size of a container in a namespace is only set until the end of the namespace
+        code = "namespace { std::array<int, 9> a; }\n"
+               "int f() { return a[1]; }\n";
+        TODO_ASSERT_EQUALS(
+            "",
+            "values.size():0",
+            isKnownContainerSizeValue(tokenValues(code, "a [", ValueFlow::Value::ValueType::CONTAINER_SIZE), 9));
     }
 
     void valueFlowContainerElement()
