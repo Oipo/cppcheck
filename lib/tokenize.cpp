@@ -2597,12 +2597,16 @@ namespace {
         std::set<std::string> recordTypes;
         std::set<std::string> baseTypes;
         bool recordInChildren = false; // is there a record in the children or in their children
+        std::size_t records = 0; // the number of records that are added to the global scope and its children
 
         ScopeInfo3 *addChild(Type scopeType, std::string scopeName, const Token *bodyStartToken, const Token *bodyEndToken) {
             children.emplace_back(this, scopeType, std::move(scopeName), bodyStartToken, bodyEndToken);
             if (scopeType == Record) {
-                for (ScopeInfo3 *scope = this; scope; scope = scope->parent)
+                for (ScopeInfo3 *scope = this; scope; scope = scope->parent) {
                     scope->recordInChildren = true;
+                    if (!scope->parent)
+                        ++scope->records;
+                }
             }
             return &children.back();
         }
@@ -3336,6 +3340,9 @@ bool Tokenizer::simplifyUsing()
         }
         const std::uint64_t nameBit = usingNames.count(nameToken->str()) != 0 ? blockNameBit(nameToken->str()) : ~std::uint64_t{0};
         std::vector<Token *> blocks; // the blocks that contain tok1
+        // the scopes of the member functions, findScope() only finds records so they can change when a record is added
+        std::map<std::pair<const ScopeInfo3 *, std::string>, const ScopeInfo3 *> memberFunctionScopes;
+        std::size_t memberFunctionScopesRecords = scopeInfo1.records;
         for (Token* tok1 = startToken; !skip && tok1 && tok1 != endToken; tok1 = tok1->next()) {
             // skip enum body
             if (tok1 && tok1 == enumOpenBrace) {
@@ -3404,7 +3411,14 @@ bool Tokenizer::simplifyUsing()
                 if (!scope1.empty())
                     scope1 += " :: ";
                 scope1 += memberFunctionScope(tok1);
-                const ScopeInfo3 * temp = currentScope1->findScope(scope1);
+                if (scopeInfo1.records != memberFunctionScopesRecords) {
+                    memberFunctionScopes.clear();
+                    memberFunctionScopesRecords = scopeInfo1.records;
+                }
+                auto it = memberFunctionScopes.find(std::make_pair(currentScope1, scope1));
+                if (it == memberFunctionScopes.end())
+                    it = memberFunctionScopes.emplace(std::make_pair(currentScope1, scope1), currentScope1->findScope(scope1)).first;
+                const ScopeInfo3 * temp = it->second;
                 if (temp) {
                     const Token *end = memberFunctionEnd(tok1);
                     if (end) {
@@ -6275,8 +6289,10 @@ bool Tokenizer::simplifyTokenList1(const char FileName[])
     });
 
     // using A = B;
-    while (simplifyUsing())
-        ;
+    Timer::run("Tokenizer::simplifyTokens1::simplifyTokenList1::simplifyUsing", mTimerResults, [&]() {
+        while (simplifyUsing())
+            ;
+    });
 
     // Add parentheses to ternary operator where necessary
     // TODO: this is only necessary if one typedef simplification had a comma and was used within ?:

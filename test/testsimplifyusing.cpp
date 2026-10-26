@@ -103,6 +103,7 @@ private:
         TEST_CASE(simplifyUsing13873); // function declaration
         TEST_CASE(simplifyUsing14877);
         TEST_CASE(simplifyUsingBlocks); // blocks that are skipped when looking for a type alias
+        TEST_CASE(simplifyUsingMemberFunctionScope);
 
         TEST_CASE(scopeInfo1);
         TEST_CASE(scopeInfo2);
@@ -1776,6 +1777,17 @@ private:
                              "void g() { { C::f() : m(1) } X x{1}; }\n";
         ASSERT_EQUALS("struct B { } ; struct C : B { void f ( ) ; } ; void g ( ) { { C :: f ( ) : m ( 1 ) } int x { 1 } ; }",
                       tok(code7));
+    }
+
+    void simplifyUsingMemberFunctionScope() {
+        // the class of the member function is defined after the first member function is seen
+        const char code[] = "struct B { using X = int; };\n"
+                            "void C::f(X a) {}\n"
+                            "struct C : B { void g(X); };\n"
+                            "void C::g(X b) {}\n";
+        ASSERT_EQUALS("struct B { } ; void C :: f ( X a ) { } struct C : B { void g ( int ) ; } ; void C :: g ( int b ) { }",
+                      tok(code));
+        ASSERT_EQUALS("[test.cpp:2:9]: (debug) Executable scope 'f' with unknown function. [symbolDatabaseWarning]\n", errout_str());
     }
 
     void scopeInfo1() {
