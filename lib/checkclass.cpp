@@ -36,6 +36,7 @@
 #include <cctype>
 #include <cstring>
 #include <iterator>
+#include <set>
 #include <utility>
 #include <unordered_map>
 
@@ -209,19 +210,25 @@ void CheckClassImpl::constructors()
     logChecker("CheckClass::checkConstructors"); // style,warning
 
     const bool printInconclusive = mSettings.certainty.isEnabled(Certainty::inconclusive);
+
+    // the classes that are the type of a variable in a union
+    std::set<const Scope *> classesInUnions;
+    for (const Scope &unionScope : mSymbolDatabase->scopeList) {
+        if (unionScope.type != ScopeType::eUnion)
+            continue;
+        for (const Variable &var : unionScope.varlist) {
+            if (var.type() && var.type()->classScope)
+                classesInUnions.insert(var.type()->classScope);
+        }
+    }
+
     for (const Scope * scope : mSymbolDatabase->classAndStructScopes) {
         if (mSettings.hasLib("vcl") && isVclTypeInit(scope->definedType))
             continue;
 
         const bool unusedTemplate = Token::simpleMatch(scope->classDef->previous(), ">");
 
-        const bool usedInUnion = std::any_of(mSymbolDatabase->scopeList.cbegin(), mSymbolDatabase->scopeList.cend(), [&](const Scope& unionScope) {
-            if (unionScope.type != ScopeType::eUnion)
-                return false;
-            return std::any_of(unionScope.varlist.cbegin(), unionScope.varlist.cend(), [&](const Variable& var) {
-                return var.type() && var.type()->classScope == scope;
-            });
-        });
+        const bool usedInUnion = classesInUnions.count(scope) != 0;
 
         // There are no constructors.
         std::set<const Variable*> diagVars;

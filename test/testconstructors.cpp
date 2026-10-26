@@ -88,6 +88,7 @@ private:
         TEST_CASE(noConstructor9); // ticket #4419
         TEST_CASE(noConstructor10); // ticket #6614
         TEST_CASE(noConstructor11); // ticket #3552
+        TEST_CASE(noConstructor11b); // only the class that is used in a union
         TEST_CASE(noConstructor12); // #8951 - member initialization
         TEST_CASE(noConstructor13); // #9998
         TEST_CASE(noConstructor14); // #10770
@@ -697,6 +698,13 @@ private:
         check("class Fred { int x; };\n"
               "union U { int y; Fred fred; };\n");
         ASSERT_EQUALS("", errout_str());
+    }
+
+    void noConstructor11b() {
+        check("class Fred { int x; };\n"
+              "class Wilma { int y; };\n"
+              "union U { int y; Fred fred; };\n");
+        ASSERT_EQUALS("[test.cpp:2:1]: (style) The class 'Wilma' does not declare a constructor although it has private member variables which likely require initialization. [noConstructor]\n", errout_str());
     }
 
     void noConstructor12() { // #8951
