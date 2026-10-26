@@ -1062,6 +1062,16 @@ bool Tokenizer::isFunctionPointer(const Token* tok) {
     return Token::simpleMatch(tok, ") (");
 }
 
+// The summary of a block for simplifyTypedefCpp() and simplifyUsing(): the names of the type
+// aliases in the block, and is there something in the block that changes the scope or what is
+// skipped after the block
+enum BlockSummary : std::uint8_t { BlockUnknown, BlockNames, BlockScope };
+
+static std::uint64_t blockNameBit(const std::string &name)
+{
+    return std::uint64_t{1} << (std::hash<std::string>{}(name) % 64);
+}
+
 static bool matchCurrentType(const Token* tok, std::map<int, std::string>& types)
 {
     if (tok->isC())
@@ -1190,6 +1200,15 @@ void Tokenizer::simplifyTypedef()
     simplifyTypedefCpp();
 }
 
+// Is the '(' the start of the arguments of a member function that is implemented outside of its class
+static bool isQualifiedFunctionHead(const Token *tok)
+{
+    const Token *func = tok->previous();
+    if (func && func->strAt(-1) == "operator")
+        func = func->previous();
+    return func && Token::Match(func->tokAt(-2), "%name% ::") && TokenList::isFunctionHead(tok, "{:");
+}
+
 static Token* simplifyTypedefCopyTokens(Token* to, const Token* fromStart, const Token* toEnd, const Token* location, const std::string &originalName) {
     Token* ret = TokenList::copyTokens(to, fromStart, toEnd);
     for (Token* tok = to->next(); tok != ret->next(); tok = tok->next()) {
@@ -1221,6 +1240,42 @@ void Tokenizer::simplifyTypedefCpp()
 
     // add global namespace
     std::vector<Space> spaceInfo(1);
+
+    // The blocks that can be skipped when looking for a typedef name: the blocks without the name
+    // and without what changes the scope or what is seen after the block (a namespace, a member
+    // function that is implemented outside of its class, a typedef that might not end in the block)
+    std::unordered_set<std::string> typedefNames;
+    bool blocksSummarized = false;
+    const auto summarizeBlocks = [&typedefNames](Token *start, const Token *end) {
+        struct Block {
+            Token *start;
+            bool scope;
+            std::uint64_t names;
+        };
+        std::vector<Block> blocks;
+        for (Token *tok = start; tok != end; tok = tok->next()) {
+            if (tok->str() == "{" && tok->link()) {
+                blocks.push_back({tok, false, 0});
+                continue;
+            }
+            if (blocks.empty())
+                continue;
+            if (tok == blocks.back().start->link()) {
+                const Block block = blocks.back();
+                blocks.pop_back();
+                block.start->blockSummary(block.scope ? BlockScope : BlockNames);
+                block.start->blockNames(block.names);
+                if (!blocks.empty()) {
+                    blocks.back().scope |= block.scope;
+                    blocks.back().names |= block.names;
+                }
+            } else if (Token::Match(tok, "typedef|namespace") || (tok->str() == "(" && isQualifiedFunctionHead(tok))) {
+                blocks.back().scope = true;
+            } else if (tok->isName() && typedefNames.count(tok->str()) != 0) {
+                blocks.back().names |= blockNameBit(tok->str());
+            }
+        }
+    };
 
     const std::time_t maxTime = mSettings.typedefMaxTime > 0 ? std::time(nullptr) + mSettings.typedefMaxTime: 0;
     ProgressReporter progressReporter(mErrorLogger, mSettings.reportProgress, list.getSourceFilePath(), "Tokenize (typedef)");
@@ -1718,6 +1773,27 @@ void Tokenizer::simplifyTypedefCpp()
         }
         mTypedefInfo.push_back(std::move(typedefInfo));
 
+        if (!blocksSummarized) {
+            blocksSummarized = true;
+            // the names in the typedefs
+            for (const Token *tok2 = list.front(); tok2; tok2 = tok2->next()) {
+                if (tok2->str() != "typedef")
+                    continue;
+                int level = 0;
+                for (const Token *tok3 = tok2->next(); tok3 && (level > 0 || tok3->str() != ";"); tok3 = tok3->next()) {
+                    if (tok3->str() == "{")
+                        ++level;
+                    else if (tok3->str() == "}") {
+                        if (level == 0)
+                            break;
+                        --level;
+                    } else if (tok3->isName())
+                        typedefNames.insert(tok3->str());
+                }
+            }
+            summarizeBlocks(list.front(), nullptr);
+        }
+
         while (!done) {
             std::string pattern = typeName->str();
             int scope = 0;
@@ -1735,6 +1811,9 @@ void Tokenizer::simplifyTypedefCpp()
                     classPath += " :: ";
                 classPath += spaceInfo[i].className;
             }
+            // a typedef that is added after the names are collected is looked for in all blocks
+            const std::uint64_t nameBit = typedefNames.count(typeName->str()) != 0 ? blockNameBit(typeName->str()) : ~std::uint64_t{0};
+            std::vector<Token *> blocks; // the blocks that contain tok2, and blocks whose end is skipped
 
             for (Token *tok2 = tok; tok2; tok2 = tok2->next()) {
                 if (Settings::terminated())
@@ -1775,6 +1854,13 @@ void Tokenizer::simplifyTypedefCpp()
                 if (tok2->link()) { // Pre-check for performance
                     // check for end of scope
                     if (tok2->str() == "}") {
+                        for (auto it = blocks.rbegin(); it != blocks.rend(); ++it) {
+                            if ((*it)->link() == tok2) {
+                                blocks.erase(std::prev(it.base()), blocks.end());
+                                break;
+                            }
+                        }
+
                         // check for end of member function
                         if (inMemberFunc) {
                             --memberScope;
@@ -1850,6 +1936,14 @@ void Tokenizer::simplifyTypedefCpp()
                             ++memberScope;
 
                         ++scope;
+
+                        blocks.push_back(tok2);
+                        if (tok2->blockSummary() == BlockUnknown)
+                            summarizeBlocks(tok2, tok2->link()->next());
+                        // skip the block when there is nothing to see in it, the end of the block is seen
+                        // (a ';' in a block in a typedef ends the typedef)
+                        if (!inTypeDef && tok2->blockSummary() == BlockNames && (tok2->blockNames() & nameBit) == 0)
+                            tok2 = tok2->link()->previous();
                     }
                 }
 
@@ -1973,6 +2067,10 @@ void Tokenizer::simplifyTypedefCpp()
 
                 if (simplifyType) {
                     mTypedefInfo.back().used = true;
+
+                    // the blocks are changed below
+                    for (Token *block : blocks)
+                        block->blockSummary(BlockScope);
 
                     // can't simplify 'operator functionPtr ()' and 'functionPtr operator ... ()'
                     if (functionPtr && (tok2->strAt(-1) == "operator" ||
@@ -2727,15 +2825,6 @@ namespace {
         }
     }
 
-    // The summary of a block for simplifyUsing(): the names of the type aliases in the block, and
-    // is there something in the block that changes the scope or what is skipped
-    enum UsingBlockSummary : std::uint8_t { UsingBlockUnknown, UsingBlockNames, UsingBlockScope };
-
-    std::uint64_t usingNameBit(const std::string &name)
-    {
-        return std::uint64_t{1} << (std::hash<std::string>{}(name) % 64);
-    }
-
     Token *findSemicolon(Token *tok)
     {
         int level = 0;
@@ -3027,7 +3116,7 @@ bool Tokenizer::simplifyUsing()
             if (tok == blocks.back().start->link()) {
                 const Block block = blocks.back();
                 blocks.pop_back();
-                block.start->blockSummary(block.scope ? UsingBlockScope : UsingBlockNames);
+                block.start->blockSummary(block.scope ? BlockScope : BlockNames);
                 block.start->blockNames(block.names);
                 if (!blocks.empty()) {
                     blocks.back().scope |= block.scope;
@@ -3041,7 +3130,7 @@ bool Tokenizer::simplifyUsing()
                 // in the block (findGarbageCode() does not allow a template without '>')
                 blocks.back().scope = true;
             } else if (tok->isName() && usingNames.count(tok->str()) != 0) {
-                blocks.back().names |= usingNameBit(tok->str());
+                blocks.back().names |= blockNameBit(tok->str());
             }
         }
     };
@@ -3245,7 +3334,7 @@ bool Tokenizer::simplifyUsing()
             }
             summarizeBlocks(list.front(), nullptr);
         }
-        const std::uint64_t nameBit = usingNames.count(nameToken->str()) != 0 ? usingNameBit(nameToken->str()) : ~std::uint64_t{0};
+        const std::uint64_t nameBit = usingNames.count(nameToken->str()) != 0 ? blockNameBit(nameToken->str()) : ~std::uint64_t{0};
         std::vector<Token *> blocks; // the blocks that contain tok1
         for (Token* tok1 = startToken; !skip && tok1 && tok1 != endToken; tok1 = tok1->next()) {
             // skip enum body
@@ -3271,10 +3360,10 @@ bool Tokenizer::simplifyUsing()
                 }
                 if (tok1->str() == "{" && tok1->link()) {
                     blocks.push_back(tok1);
-                    if (tok1->blockSummary() == UsingBlockUnknown)
+                    if (tok1->blockSummary() == BlockUnknown)
                         summarizeBlocks(tok1, tok1->link()->next());
                     // skip the block when there is nothing to see in it, the end of the block is seen
-                    if (tok1->blockSummary() == UsingBlockNames && (tok1->blockNames() & nameBit) == 0 &&
+                    if (tok1->blockSummary() == BlockNames && (tok1->blockNames() & nameBit) == 0 &&
                         (!memberFuncEnd || memberFuncEnd == endToken))
                         tok1 = tok1->link()->previous();
                 } else if (!blocks.empty() && tok1 == blocks.back()->link()) {
@@ -3334,7 +3423,7 @@ bool Tokenizer::simplifyUsing()
 
             // the blocks are changed below
             for (Token *block : blocks)
-                block->blockSummary(UsingBlockScope);
+                block->blockSummary(BlockScope);
 
             if (!isTypedefInfoAdded && Token::Match(tok1, "%name% (")) {
                 isTypedefInfoAdded = true;

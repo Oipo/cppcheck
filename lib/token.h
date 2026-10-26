@@ -113,8 +113,8 @@ private:
         short mBits = -1;
 
         /** A summary of the block that starts at this '{', to skip the block when looking for
-            something. TemplateSimplifier and Tokenizer::simplifyUsing() compute it for all
-            blocks before they use it. */
+            something. TemplateSimplifier, Tokenizer::simplifyTypedefCpp() and
+            Tokenizer::simplifyUsing() compute it for all blocks before they use it. */
         std::uint8_t mBlockSummary{};
         std::uint64_t mBlockNames{};
 

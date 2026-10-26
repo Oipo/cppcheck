@@ -254,6 +254,7 @@ private:
         TEST_CASE(simplifyTypedefShadow);  // #4445 - shadow variable
 
         TEST_CASE(simplifyTypedefMacro);
+        TEST_CASE(simplifyTypedefBlocks);
 
         TEST_CASE(simplifyTypedefOriginalName1);
         TEST_CASE(simplifyTypedefOriginalName2);
@@ -4545,6 +4546,45 @@ private:
                             "}\n";
         ASSERT_EQUALS("void foo ( uint32_t prev_segment ) { if ( prev_segment == ( ( uint32_t ) 12 ) ) { } }",
                       simplifyTypedefP(code));
+    }
+
+    void simplifyTypedefBlocks() {
+        // usage in blocks, in a lambda and in a member function that is implemented outside of its class
+        const char code1[] = "struct S { typedef int T; void f(); };\n"
+                             "void g() { { int a; } { S::T b; } auto l = [] { S::T c; return c; }; }\n"
+                             "void S::f() { { T d; } if (true) { T e; } }\n";
+        ASSERT_EQUALS("struct S { void f ( ) ; } ; void g ( ) { { int a ; } { int b ; } auto l = [ ] { int c ; return c ; } ; } void S :: f ( ) { { int d ; } if ( true ) { int e ; } }",
+                      simplifyTypedef(code1));
+
+        // a typedef in a function and a variable with the same name in a block
+        const char code2[] = "void f() { typedef int T; { T a; } { int x; } T b; }\n"
+                             "void g() { typedef char T; { int T; T = 1; } T c; }\n";
+        ASSERT_EQUALS("void f ( ) { { int a ; } { int x ; } int b ; } void g ( ) { { int T ; T = 1 ; } char c ; }",
+                      simplifyTypedef(code2));
+
+        // the substituted type is the name of the next typedef
+        const char code3[] = "struct S1 { typedef A B; };\n"
+                             "typedef int A;\n"
+                             "void f() { { S1::B x; } }\n"
+                             "void g() { typedef char A; }\n";
+        ASSERT_EQUALS("struct S1 { } ; void f ( ) { { int x ; } } void g ( ) { }",
+                      simplifyTypedef(code3));
+
+        // the second typedef in a namespace is used after the namespace is opened again
+        const char code4[] = "namespace N { namespace K { typedef int T; typedef int U; } }\n"
+                             "namespace N { namespace K { int z; } }\n"
+                             "N::K::U w;\n";
+        TODO_ASSERT_EQUALS("namespace N { namespace K { } } namespace N { namespace K { int z ; } } int w ;",
+                           "namespace N { namespace K { } } namespace N { namespace K { int z ; } } N :: K :: U w ;",
+                           simplifyTypedef(code4));
+
+        // a conditional expression with a qualified function call in a member function
+        const char code5[] = "struct C { typedef int T; void f(); };\n"
+                             "void C::f() { { int a = 1 ? C::f() : x; } }\n"
+                             "T t;\n";
+        TODO_ASSERT_EQUALS("struct C { void f ( ) ; } ; void C :: f ( ) { { int a = 1 ? C :: f ( ) : x ; } } T t ;",
+                           "struct C { void f ( ) ; } ; void C :: f ( ) { { int a = 1 ? C :: f ( ) : x ; } } int t ;",
+                           simplifyTypedef(code5));
     }
 
     void simplifyTypedefOriginalName1() {
