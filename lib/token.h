@@ -112,6 +112,12 @@ private:
         /** Bitfield bit count. */
         short mBits = -1;
 
+        /** A summary of the block that starts at this '{', to skip the block when looking for
+            something. TemplateSimplifier and Tokenizer::simplifyUsing() compute it for all
+            blocks before they use it. */
+        std::uint8_t mBlockSummary{};
+        std::uint64_t mBlockNames{};
+
         // AST..
         Token* mAstOperand1{};
         Token* mAstOperand2{};
@@ -1317,6 +1323,21 @@ public:
      * @param newLocation srcStart will be placed after this token.
      */
     static void move(Token *srcStart, Token *srcEnd, Token *newLocation);
+
+    /** A summary of the block that starts at this '{', 0 when it is not known */
+    std::uint8_t blockSummary() const {
+        return mImpl->mBlockSummary;
+    }
+    void blockSummary(std::uint8_t summary) {
+        mImpl->mBlockSummary = summary;
+    }
+    /** Bits for names in the block that starts at this '{' */
+    std::uint64_t blockNames() const {
+        return mImpl->mBlockNames;
+    }
+    void blockNames(std::uint64_t names) {
+        mImpl->mBlockNames = names;
+    }
 
     /** Get progressValue (0 - 100) */
     nonneg int progressValue() const {

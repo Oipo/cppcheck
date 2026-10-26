@@ -323,6 +323,8 @@ private:
 
         TEST_CASE(template_shift_negative); // shift folding with a negative operand
 
+        TEST_CASE(templateUsageInBlocks); // blocks that are skipped when looking for template usage
+
         TEST_CASE(dumpTemplateArgFrom);
     }
 
@@ -6782,6 +6784,119 @@ private:
                                 "S<9223372036854775808U> s1 ; S<1> s2 ; S<1> s3 ; "
                                 "struct S<9223372036854775808U> { } ; struct S<1> { } ;";
         ASSERT_EQUALS(expected, tok(code));
+    }
+
+    void templateUsageInBlocks() {
+        // usage in a block of an instantiation that is expanded
+        const char code1[] = "template<class T> struct H { T x; };\n"
+                             "template<class T> void g() { { H<T> h; } }\n"
+                             "void f() { if (true) { { g<int>(); } } }\n";
+        ASSERT_EQUALS("struct H<int> ; void g<int> ( ) ; void f ( ) { if ( true ) { g<int> ( ) ; } } void g<int> ( ) { H<int> h ; } struct H<int> { int x ; } ;",
+                      tok(code1));
+
+        // usage in a block of a template that is expanded more than once
+        const char code2[] = "template<class T> struct A { T a; };\n"
+                             "template<class T> struct S { void f() { if (true) { A<T> a; } } };\n"
+                             "void f() { { S<int> s; } { S<char> s2; } }\n";
+        ASSERT_EQUALS("struct A<int> ; struct A<char> ; struct S<int> ; struct S<char> ; void f ( ) { { S<int> s ; } { S<char> s2 ; } } struct S<int> { void f ( ) { if ( true ) { A<int> a ; } } } ; struct S<char> { void f ( ) { if ( true ) { A<char> a ; } } } ; struct A<int> { int a ; } ; struct A<char> { char a ; } ;",
+                      tok(code2));
+
+        // qualified and unqualified usage
+        const char code3[] = "namespace N { template<class T> struct A { T a; }; void f() { { A<int> a; } } }\n"
+                             "void g() { { N::A<char> b; } { N::A<int> c; } }\n";
+        ASSERT_EQUALS("namespace N { struct A<int> ; struct A<char> ; void f ( ) { A<int> a ; } } void g ( ) { { N :: A<char> b ; } { N :: A<int> c ; } } struct N :: A<int> { int a ; } ; struct N :: A<char> { char a ; } ;",
+                      tok(code3));
+
+        // usage in template arguments and in nested blocks
+        const char code4[] = "template<class T> struct A { T a; };\n"
+                             "template<class T> struct B { T b; };\n"
+                             "void f() { { B<A<int>> x; } { { A<int> y; } } }\n";
+        ASSERT_EQUALS("struct A<int> ; struct B<A<int>> ; void f ( ) { { B<A<int>> x ; } { A<int> y ; } } struct B<A<int>> { A<int> b ; } ; struct A<int> { int a ; } ;",
+                      tok(code4));
+
+        // usage of a member template
+        const char code5[] = "template<class T> struct A { template<class U> struct B { U b; }; };\n"
+                             "void f() { { A<int>::B<char> x; } }\n";
+        ASSERT_EQUALS("struct A<int> ; void f ( ) { A<int> :: B<char> x ; } struct A<int> { struct B<char> ; } ; struct A<int> :: B<char> { char b ; } ;",
+                      tok(code5));
+
+        // member function implemented outside of the class definition after other template definitions
+        const char code6[] = "template<class T> struct B { void h() { { T t; } } };\n"
+                             "template<class T> struct A { void f(); void g() { if (true) { B<T> b; } } };\n"
+                             "template<class U> struct C { int c() { { return 0; } } };\n"
+                             "template<class T> void A<T>::f() { { T t; } }\n"
+                             "void x() { { A<int> a; a.f(); } }\n";
+        ASSERT_EQUALS("struct B<int> ; struct A<int> ; template < class U > struct C { int c ( ) { return 0 ; } } ; "
+                      "void x ( ) { A<int> a ; a . f ( ) ; } "
+                      "struct A<int> { void f ( ) ; void g ( ) { if ( true ) { B<int> b ; } } } ; "
+                      "void A<int> :: f ( ) { int t ; } "
+                      "struct B<int> { void h ( ) { int t ; } } ;",
+                      tok(code6));
+
+        // forward declaration with a template argument that is not used in the namespace
+        const char code7[] = "template<class T> struct W { T w; };\n"
+                             "namespace N {\n"
+                             "template<class T> void f(T x) { }\n"
+                             "}\n"
+                             "void g() { W<int> w; N::f<W<int>>(w); }\n";
+        ASSERT_EQUALS("struct W<int> ; "
+                      "namespace N { void f<W<int>> ( W<int> x ) ; } "
+                      "void g ( ) { W<int> w ; N :: f<W<int>> ( w ) ; } "
+                      "void N :: f<W<int>> ( W<int> x ) { } "
+                      "struct W<int> { int w ; } ;",
+                      tok(code7));
+
+        // member function implemented outside of the class definition in a namespace
+        const char code8[] = "template<class T> struct W { T w; };\n"
+                             "namespace N {\n"
+                             "template<class T> struct A { void f(T x); };\n"
+                             "template<class T> void A<T>::f(T x) { }\n"
+                             "}\n"
+                             "void g() { N::A<W<int>> a; }\n";
+        ASSERT_EQUALS("struct W<int> ; "
+                      "namespace N { struct A<W<int>> ; } "
+                      "void g ( ) { N :: A<W<int>> a ; } "
+                      "struct N :: A<W<int>> { void f ( W<int> x ) ; } ; "
+                      "void N :: A<W<int>> :: f ( W<int> x ) { } "
+                      "struct W<int> { int w ; } ;",
+                      tok(code8));
+
+        // The next code is simplified the same when the summaries of the blocks are not updated,
+        // the summaries are checked when NDEBUG is not defined.
+        // variable templates in a block are compared
+        const char code9[] = "namespace N {\n"
+                             "template<class T> constexpr int v = 1;\n"
+                             "template<class T> struct A { T a; };\n"
+                             "void f() { { bool b = v<int> < v<char>; A<int> x; } }\n"
+                             "}\n";
+        ASSERT_EQUALS("namespace N { constexpr int v<int> = 1 ; constexpr int v<char> = 1 ; struct A<int> ; void f ( ) { bool b ; b = v<int> < v<char> ; A<int> x ; } } struct N :: A<int> { int a ; } ;",
+                      tok(code9));
+
+        // a specialization of a variable template in a block is compared
+        const char code10[] = "namespace N {\n"
+                              "template<class T> constexpr int v = 1;\n"
+                              "template<> constexpr int v<int> = 2;\n"
+                              "void f() { { bool b = v<int> < 3 > 1; } { int c = v<char>; } }\n"
+                              "}\n";
+        ASSERT_EQUALS("namespace N { constexpr int v<char> = 1 ; constexpr int v<int> = 2 ; void f ( ) { { bool b ; b = v<int> < 3 > 1 ; } { int c ; c = v<char> ; } } }",
+                      tok(code10));
+
+        // variable templates are compared in a block of a template that is expanded
+        const char code11[] = "namespace N {\n"
+                              "template<class T> constexpr T v = T();\n"
+                              "template<class T> struct S { void m() { { bool b = v<T> < v<int>; } } };\n"
+                              "void g() { { S<char> s; bool c = v<int> < v<char> > 0; } }\n"
+                              "}\n";
+        ASSERT_EQUALS("namespace N { constexpr int v<int> = 0 ; constexpr char v<char> = 0 ; struct S<char> ; void g ( ) { S<char> s ; bool c ; c = v<int> < v<char> > 0 ; } } struct N :: S<char> { void m ( ) { bool b ; b = v<char> < v<int> ; } } ;",
+                      tok(code11));
+
+        // function template instantiations in a block are compared
+        const char code12[] = "template<class T> T f() { return T(); }\n"
+                              "template<class T> struct A { T a; };\n"
+                              "void g() { { bool b = &f<int> < &f<char>; } }\n"
+                              "void h() { f<int>(); f<char>(); A<int> x; }\n";
+        ASSERT_EQUALS("int f<int> ( ) ; char f<char> ( ) ; struct A<int> ; void g ( ) { bool b ; b = & f<int> < & f<char> ; } void h ( ) { f<int> ( ) ; f<char> ( ) ; A<int> x ; } struct A<int> { int a ; } ; int f<int> ( ) { return int ( ) ; } char f<char> ( ) { return char ( ) ; }",
+                      tok(code12));
     }
 
     void dumpTemplateArgFrom() {

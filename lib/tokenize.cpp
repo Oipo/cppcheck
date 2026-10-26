@@ -2498,9 +2498,14 @@ namespace {
         std::set<std::string> usingNamespaces;
         std::set<std::string> recordTypes;
         std::set<std::string> baseTypes;
+        bool recordInChildren = false; // is there a record in the children or in their children
 
         ScopeInfo3 *addChild(Type scopeType, std::string scopeName, const Token *bodyStartToken, const Token *bodyEndToken) {
             children.emplace_back(this, scopeType, std::move(scopeName), bodyStartToken, bodyEndToken);
+            if (scopeType == Record) {
+                for (ScopeInfo3 *scope = this; scope; scope = scope->parent)
+                    scope->recordInChildren = true;
+            }
             return &children.back();
         }
 
@@ -2514,6 +2519,8 @@ namespace {
             for (const auto & child : children) {
                 if (child.type == Record && (child.name == scope || child.fullName == scope))
                     return &child;
+                if (!child.recordInChildren)
+                    continue;
 
                 const ScopeInfo3 * temp = child.findInChildren(scope);
                 if (temp)
@@ -2718,6 +2725,15 @@ namespace {
             scopeInfo = scopeInfo->addChild(record ? ScopeInfo3::Record : ScopeInfo3::Namespace, std::move(classname), tok, tok->link());
             scopeInfo->baseTypes = std::move(baseTypes);
         }
+    }
+
+    // The summary of a block for simplifyUsing(): the names of the type aliases in the block, and
+    // is there something in the block that changes the scope or what is skipped
+    enum UsingBlockSummary : std::uint8_t { UsingBlockUnknown, UsingBlockNames, UsingBlockScope };
+
+    std::uint64_t usingNameBit(const std::string &name)
+    {
+        return std::uint64_t{1} << (std::hash<std::string>{}(name) % 64);
     }
 
     Token *findSemicolon(Token *tok)
@@ -2990,6 +3006,46 @@ bool Tokenizer::simplifyUsing()
 
     const unsigned int maxReplacementTokens = 1000; // limit the number of tokens we replace
 
+    // the blocks that can be skipped when looking for a type alias, the type aliases in template
+    // declarations are not simplified
+    std::unordered_set<std::string> usingNames;
+    bool blocksSummarized = false;
+    const auto summarizeBlocks = [&usingNames](Token *start, const Token *end) {
+        struct Block {
+            Token *start;
+            bool scope;
+            std::uint64_t names;
+        };
+        std::vector<Block> blocks;
+        for (Token *tok = start; tok != end; tok = tok->next()) {
+            if (tok->str() == "{" && tok->link()) {
+                blocks.push_back({tok, false, 0});
+                continue;
+            }
+            if (blocks.empty())
+                continue;
+            if (tok == blocks.back().start->link()) {
+                const Block block = blocks.back();
+                blocks.pop_back();
+                block.start->blockSummary(block.scope ? UsingBlockScope : UsingBlockNames);
+                block.start->blockNames(block.names);
+                if (!blocks.empty()) {
+                    blocks.back().scope |= block.scope;
+                    blocks.back().names |= block.names;
+                }
+            } else if (Token::Match(tok, "namespace|class|struct|union %name% {|:|::|<") ||
+                       Token::Match(tok, "using namespace %name% ;|::") ||
+                       (Token::Match(tok, "template < !!>") && !tok->next()->findClosingBracket()) ||
+                       (tok->str() == "(" && isMemberFunction(tok))) {
+                // what changes the scope or what is skipped after the block, an enum body is skipped
+                // in the block (findGarbageCode() does not allow a template without '>')
+                blocks.back().scope = true;
+            } else if (tok->isName() && usingNames.count(tok->str()) != 0) {
+                blocks.back().names |= usingNameBit(tok->str());
+            }
+        }
+    };
+
     bool substitute = false;
     ScopeInfo3 scopeInfo;
     ScopeInfo3 *currentScope = &scopeInfo;
@@ -3176,6 +3232,21 @@ bool Tokenizer::simplifyUsing()
         std::string scope1 = currentScope1->fullName;
         bool skip = false; // don't erase type aliases we can't parse
         Token *enumOpenBrace = nullptr;
+        if (!blocksSummarized) {
+            blocksSummarized = true;
+            for (Token *tok2 = list.front(); tok2; tok2 = tok2->next()) {
+                if (Token::Match(tok2, "template < !!>")) {
+                    Token *declEndToken = TemplateSimplifier::findTemplateDeclarationEnd(tok2);
+                    if (declEndToken)
+                        tok2 = declEndToken;
+                } else if (Token::Match(tok2, "using %name%") && tok2->strAt(1) != "namespace") {
+                    usingNames.insert(tok2->strAt(1));
+                }
+            }
+            summarizeBlocks(list.front(), nullptr);
+        }
+        const std::uint64_t nameBit = usingNames.count(nameToken->str()) != 0 ? usingNameBit(nameToken->str()) : ~std::uint64_t{0};
+        std::vector<Token *> blocks; // the blocks that contain tok1
         for (Token* tok1 = startToken; !skip && tok1 && tok1 != endToken; tok1 = tok1->next()) {
             // skip enum body
             if (tok1 && tok1 == enumOpenBrace) {
@@ -3197,6 +3268,17 @@ bool Tokenizer::simplifyUsing()
                     inMemberFunc = false;
                     memberFuncScope = nullptr;
                     memberFuncEnd = nullptr;
+                }
+                if (tok1->str() == "{" && tok1->link()) {
+                    blocks.push_back(tok1);
+                    if (tok1->blockSummary() == UsingBlockUnknown)
+                        summarizeBlocks(tok1, tok1->link()->next());
+                    // skip the block when there is nothing to see in it, the end of the block is seen
+                    if (tok1->blockSummary() == UsingBlockNames && (tok1->blockNames() & nameBit) == 0 &&
+                        (!memberFuncEnd || memberFuncEnd == endToken))
+                        tok1 = tok1->link()->previous();
+                } else if (!blocks.empty() && tok1 == blocks.back()->link()) {
+                    blocks.pop_back();
                 }
                 continue;
             }
@@ -3249,6 +3331,10 @@ bool Tokenizer::simplifyUsing()
                     continue;
             } else if (!usingMatch(nameToken, scope, tok1, scope1, currentScope1, nullptr))
                 continue;
+
+            // the blocks are changed below
+            for (Token *block : blocks)
+                block->blockSummary(UsingBlockScope);
 
             if (!isTypedefInfoAdded && Token::Match(tok1, "%name% (")) {
                 isTypedefInfoAdded = true;

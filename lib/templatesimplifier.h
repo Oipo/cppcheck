@@ -523,6 +523,9 @@ private:
     std::unordered_map<const Token*, int> mTemplateNamePos;
     std::string mDump;
 
+    /** are the names in the summaries of the blocks with "template" known */
+    bool mTemplateBlockNamesKnown{};
+
     std::map<std::string, std::set<std::string>> mUsedVariables;
 };
 

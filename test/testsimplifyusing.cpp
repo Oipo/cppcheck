@@ -102,6 +102,7 @@ private:
         TEST_CASE(simplifyUsing10720);
         TEST_CASE(simplifyUsing13873); // function declaration
         TEST_CASE(simplifyUsing14877);
+        TEST_CASE(simplifyUsingBlocks); // blocks that are skipped when looking for a type alias
 
         TEST_CASE(scopeInfo1);
         TEST_CASE(scopeInfo2);
@@ -1723,6 +1724,58 @@ private:
         const char code[] = "using C = struct C { C() {} };\n";
         const char expected[] = "struct C { C ( ) { } } ;";
         ASSERT_EQUALS(expected, tok(code));
+    }
+
+    void simplifyUsingBlocks() {
+        // usage in blocks, a local class and an initializer with braces
+        const char code1[] = "using T = int;\n"
+                             "struct A { A(); int m[2]; T n; };\n"
+                             "A::A() : m{ {1}, {2} } { T x = 0; { T y = x; } }\n"
+                             "void f() { { struct L { T l; }; T z; } }\n";
+        ASSERT_EQUALS("struct A { A ( ) ; int m [ 2 ] ; int n ; } ; A :: A ( ) : m { { 1 } , { 2 } } { int x ; x = 0 ; { int y ; y = x ; } } void f ( ) { struct L { int l ; } ; int z ; }",
+                      tok(code1));
+
+        // usage in a lambda and after an enum
+        const char code2[] = "using E = unsigned char;\n"
+                             "void f() { enum X { a, b }; { E e = a; } auto l = [](E p) { E q = p; return q; }; }\n"
+                             "struct S { void m() { { E s; } } E t; };\n";
+        ASSERT_EQUALS("void f ( ) { enum X { a , b } ; { unsigned char e ; e = a ; } auto l ; l = [ ] ( unsigned char p ) { unsigned char q ; q = p ; return q ; } ; } struct S { void m ( ) { unsigned char s ; } unsigned char t ; } ;",
+                      tok(code2));
+
+        // the type alias of the base class is used for the parameter of the member function, the
+        // class is defined in a block without the type alias
+        const char code3[] = "struct B { using X = int; };\n"
+                             "namespace N { struct D : B { void f(int); }; }\n"
+                             "namespace N { void D::f(X x) { } }\n";
+        ASSERT_EQUALS("struct B { } ; namespace N { struct D : B { void f ( int ) ; } ; } namespace N { void D :: f ( int x ) { } }",
+                      tok(code3));
+
+        // the type alias that is substituted first adds the other type alias to the block
+        const char code4[] = "using X = Y*;\n"
+                             "using Y = int;\n"
+                             "void f() { { X x; } }\n";
+        ASSERT_EQUALS("void f ( ) { int * x ; }", tok(code4));
+
+        // the type alias of the base class in the body of a member function
+        const char code5[] = "struct B { using X = int; };\n"
+                             "struct D : B { D(); int m[1]; X n; };\n"
+                             "D::D() : m{ {1} } { X x = 0; }\n";
+        TODO_ASSERT_EQUALS("struct B { } ; struct D : B { D ( ) ; int m [ 1 ] ; int n ; } ; D :: D ( ) : m { { 1 } } { int x ; x = 0 ; }",
+                           "struct B { } ; struct D : B { D ( ) ; int m [ 1 ] ; int n ; } ; D :: D ( ) : m { { 1 } } { X x ; x = 0 ; }",
+                           tok(code5));
+
+        // "using namespace" in a block that is not a scope
+        const char code6[] = "namespace N { using U = int; }\n"
+                             "void f() { [] noexcept(true) { using namespace N; }(); U u; }\n";
+        ASSERT_EQUALS("void f ( ) { [ ] noexcept ( true ) { using namespace N ; } ( ) ; int u ; }",
+                      tok(code6));
+
+        // the member function in a block ends after the block
+        const char code7[] = "struct B { using X = int; };\n"
+                             "struct C : B { void f(); };\n"
+                             "void g() { { C::f() : m(1) } X x{1}; }\n";
+        ASSERT_EQUALS("struct B { } ; struct C : B { void f ( ) ; } ; void g ( ) { { C :: f ( ) : m ( 1 ) } int x { 1 } ; }",
+                      tok(code7));
     }
 
     void scopeInfo1() {
