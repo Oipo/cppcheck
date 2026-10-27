@@ -2839,14 +2839,13 @@ struct Lambda {
         }
         for (const Token* c:getCaptures()) {
             if (Token::Match(c, "this !!.")) {
-                explicitCaptures[c->variable()] = std::make_pair(c, LifetimeCapture::ByReference);
+                addExplicitCapture(c->variable(), c, LifetimeCapture::ByReference);
             } else if (Token::simpleMatch(c, "* this")) {
-                explicitCaptures[c->next()->variable()] = std::make_pair(c->next(), LifetimeCapture::ByValue);
+                addExplicitCapture(c->next()->variable(), c->next(), LifetimeCapture::ByValue);
             } else if (c->variable()) {
-                explicitCaptures[c->variable()] = std::make_pair(c, LifetimeCapture::ByValue);
+                addExplicitCapture(c->variable(), c, LifetimeCapture::ByValue);
             } else if (c->isUnaryOp("&") && Token::Match(c->astOperand1(), "%var%")) {
-                explicitCaptures[c->astOperand1()->variable()] =
-                    std::make_pair(c->astOperand1(), LifetimeCapture::ByReference);
+                addExplicitCapture(c->astOperand1()->variable(), c->astOperand1(), LifetimeCapture::ByReference);
             } else {
                 const std::string& s = c->expressionString();
                 if (s == "=")
@@ -2861,11 +2860,23 @@ struct Lambda {
     const Token* arguments{};
     const Token* returnTok{};
     const Token* bodyTok{};
-    std::unordered_map<const Variable*, std::pair<const Token*, LifetimeCapture>> explicitCaptures;
+    // In the order of the capture list, so the lifetime values do not depend on the heap addresses
+    std::vector<std::pair<const Variable*, std::pair<const Token*, LifetimeCapture>>> explicitCaptures;
     LifetimeCapture implicitCapture = LifetimeCapture::Undefined;
 
     std::vector<const Token*> getCaptures() const {
         return getArguments(capture);
+    }
+
+    // A later capture of the same variable replaces the earlier one
+    void addExplicitCapture(const Variable* var, const Token* tok, LifetimeCapture c) {
+        auto it = std::find_if(explicitCaptures.begin(), explicitCaptures.end(), [&](const std::pair<const Variable*, std::pair<const Token*, LifetimeCapture>>& p) {
+            return p.first == var;
+        });
+        if (it == explicitCaptures.end())
+            explicitCaptures.emplace_back(var, std::make_pair(tok, c));
+        else
+            it->second = std::make_pair(tok, c);
     }
 
     bool isLambda() const {

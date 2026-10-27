@@ -934,6 +934,27 @@ private:
             ASSERT_EQUALS(true, lifetimes.size() == 1);
             ASSERT_EQUALS(true, lifetimes.front() == "buf");
         }
+        {
+            // the lifetime values of explicit captures are in the order of the capture list
+            const char code[] = "void f() {\n"
+                                "    int a = 0, b = 0, c = 0, d = 0;\n"
+                                "    auto g = [&c, &a, &d, &b]() { return a + b + c + d; };\n"
+                                "}\n";
+            lifetimes = lifetimeValues(code, "[ & c");
+            ASSERT_EQUALS(4U, lifetimes.size());
+            ASSERT_EQUALS("c a d b", lifetimes[0] + " " + lifetimes[1] + " " + lifetimes[2] + " " + lifetimes[3]);
+        }
+        {
+            // a later capture of the same variable replaces the earlier one
+            const char code[] = "struct S {\n"
+                                "    int i;\n"
+                                "    void f() {\n"
+                                "        auto g = [*this, this]() { return i; };\n"
+                                "    }\n"
+                                "};\n";
+            lifetimes = lifetimeValues(code, "[ * this");
+            ASSERT_EQUALS(1U, lifetimes.size());
+        }
     }
 
     void valueFlowArrayElement() {
