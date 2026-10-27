@@ -68,6 +68,17 @@ namespace MatchCompiler {
     {
         return ConstString<n>(s);
     }
+
+    inline bool isOneOf(char /*c*/)
+    {
+        return false;
+    }
+
+    template<typename ... Chars>
+    inline bool isOneOf(char c, char c1, Chars... chars)
+    {
+        return (c == c1) || isOneOf(c, chars ...);
+    }
 }
 
 #endif // matchcompilerH

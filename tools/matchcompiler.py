@@ -16,6 +16,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import codecs
 import io
 import os
 import sys
@@ -155,6 +156,16 @@ class MatchCompiler:
         self._matchFunctionCache[signature] = id
 
     @staticmethod
+    def _compileCharSet(chars):
+        # chars is the text between [ and ] as written in the C string, so it still has its escapes
+        literals = []
+        for c in codecs.decode(chars, 'unicode_escape'):
+            if c in '\\\'':
+                c = '\\' + c
+            literals.append("'" + c + "'")
+        return 'MatchCompiler::isOneOf(tok->str()[0], ' + ', '.join(literals) + ')'
+
+    @staticmethod
     def _compileCmd(tok):
         if tok == '%any%':
             return 'true'
@@ -228,7 +239,7 @@ class MatchCompiler:
 
             # [abc]
             if (len(tok) > 2) and (tok[0] == '[') and (tok[-1] == ']'):
-                ret += '    if (!tok || tok->str().size() != 1U || !strchr("' + tok[1:-1] + '", tok->str()[0]))\n'
+                ret += '    if (!tok || tok->str().size() != 1U || !' + self._compileCharSet(tok[1:-1]) + ')\n'
                 ret += '        ' + returnStatement
 
             # a|b|c

@@ -191,6 +191,19 @@ class MatchCompilerTest(unittest.TestCase):
             'if (match16(parent->tokAt(-3)) && tok->strAt(1) == MatchCompiler::makeConstString(")"))',
             output)
 
+    def test_compileCharSet(self):
+        output = self.mc._compilePattern('[;{}] %name%', 1, False)
+        self.assertIn(
+            "if (!tok || tok->str().size() != 1U || !MatchCompiler::isOneOf(tok->str()[0], ';', '{', '}'))\n",
+            output)
+        self.assertNotIn('strchr', output)
+
+        # the pattern is the text of a C string, so a backslash or a quote is escaped
+        output = self.mc._compilePattern('[`\\\\@\\"\']', 2, False)
+        self.assertIn(
+            "MatchCompiler::isOneOf(tok->str()[0], '`', '\\\\', '@', '\"', '\\'')",
+            output)
+
     def test_parseMatchSkipComments(self):
         input = '// TODO: suggest Token::exactMatch() for Token::simpleMatch() when pattern contains no whitespaces'
         output = self.mc._replaceTokenMatch(input, 0, "foo.cpp")
