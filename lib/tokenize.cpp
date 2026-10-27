@@ -1902,9 +1902,14 @@ void Tokenizer::simplifyTypedefCpp()
                             int offset = -2;
                             while (Token::Match(func->tokAt(offset - 2), "%name% ::"))
                                 offset -= 2;
-                            // check for available and matching class name
+                            // check for available and matching class name, the function is not
+                            // called in an expression such as "x ? C::f() : y"
+                            const Token *beforeName = func->tokAt(offset - 1);
                             if (spaceInfo.size() > 1 && classLevel < spaceInfo.size() &&
-                                func->strAt(offset) == spaceInfo[classLevel].className) {
+                                func->strAt(offset) == spaceInfo[classLevel].className &&
+                                (!beforeName ||
+                                 (Token::Match(beforeName, "%name%|;|{|}|*|&|&&|>|::") &&
+                                  !Token::Match(beforeName, "return|case|throw|new|delete|co_return|co_yield|co_await")))) {
                                 memberScope = 0;
                                 inMemberFunc = true;
                             }

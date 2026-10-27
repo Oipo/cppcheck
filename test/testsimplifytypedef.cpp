@@ -256,6 +256,7 @@ private:
         TEST_CASE(simplifyTypedefMacro);
         TEST_CASE(simplifyTypedefBlocks);
         TEST_CASE(simplifyTypedefNamespaceOpenedAgain);
+        TEST_CASE(simplifyTypedefConditionalInMemberFunction);
 
         TEST_CASE(simplifyTypedefOriginalName1);
         TEST_CASE(simplifyTypedefOriginalName2);
@@ -4582,9 +4583,8 @@ private:
         const char code5[] = "struct C { typedef int T; void f(); };\n"
                              "void C::f() { { int a = 1 ? C::f() : x; } }\n"
                              "T t;\n";
-        TODO_ASSERT_EQUALS("struct C { void f ( ) ; } ; void C :: f ( ) { { int a = 1 ? C :: f ( ) : x ; } } T t ;",
-                           "struct C { void f ( ) ; } ; void C :: f ( ) { { int a = 1 ? C :: f ( ) : x ; } } int t ;",
-                           simplifyTypedef(code5));
+        ASSERT_EQUALS("struct C { void f ( ) ; } ; void C :: f ( ) { { int a = 1 ? C :: f ( ) : x ; } } T t ;",
+                      simplifyTypedef(code5));
     }
 
     void simplifyTypedefNamespaceOpenedAgain() {
@@ -4609,6 +4609,33 @@ private:
                              "namespace N { int z; }\n"
                              "U u;\n";
         ASSERT_EQUALS("namespace N { } namespace N { int z ; } U u ;",
+                      simplifyTypedef(code3));
+    }
+
+    void simplifyTypedefConditionalInMemberFunction() {
+        // "C::f() :" in a conditional expression is not the head of a constructor
+        const char code1[] = "struct C { typedef int T; static int f(); void g(); };\n"
+                             "void C::g() { int a = x ? C::f() : y; }\n"
+                             "T t;\n";
+        ASSERT_EQUALS("struct C { static int f ( ) ; void g ( ) ; } ; void C :: g ( ) { int a = x ? C :: f ( ) : y ; } T t ;",
+                      simplifyTypedef(code1));
+
+        // the typedef is used in the member functions, before and after the conditional expression
+        const char code2[] = "struct C { typedef int T; static int f(); void g(); C(); int m; };\n"
+                             "void C::g() { T a = x ? C::f() : y; T b; }\n"
+                             "C::C() : m(1) { T c; }\n"
+                             "T t;\n";
+        ASSERT_EQUALS("struct C { static int f ( ) ; void g ( ) ; C ( ) ; int m ; } ; "
+                      "void C :: g ( ) { int a = x ? C :: f ( ) : y ; int b ; } "
+                      "C :: C ( ) : m ( 1 ) { int c ; } "
+                      "T t ;",
+                      simplifyTypedef(code2));
+
+        // after "return"
+        const char code3[] = "struct C { typedef int T; static int f(); int g(); };\n"
+                             "int C::g() { return x ? C::f() : 0; }\n"
+                             "T t;\n";
+        ASSERT_EQUALS("struct C { static int f ( ) ; int g ( ) ; } ; int C :: g ( ) { return x ? C :: f ( ) : 0 ; } T t ;",
                       simplifyTypedef(code3));
     }
 
