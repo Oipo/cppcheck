@@ -3394,6 +3394,9 @@ bool Tokenizer::simplifyUsing()
         }
 
         bool isTypedefInfoAdded = false; // TODO should we add a separate mUsingInfo?
+        const bool isLocalAlias = currentScope->type == ScopeInfo3::Other || currentScope->type == ScopeInfo3::MemberFunction;
+        // the end of the scope of another type alias with this name, it hides this one but a qualified name can refer to this one
+        const Token *hiddenEnd = nullptr;
 
         std::string scope1 = currentScope1->fullName;
         bool skip = false; // don't erase type aliases we can't parse
@@ -3433,6 +3436,8 @@ bool Tokenizer::simplifyUsing()
                                 "simplifyUsing: unmatched body end");
                 }
                 scope1 = currentScope1->fullName;
+                if (tok1 == hiddenEnd)
+                    hiddenEnd = nullptr;
                 if (inMemberFunc && memberFuncEnd && tok1 == memberFuncEnd) {
                     if (tok1->str() == "{" && tok1->link()) {
                         // the body of the member function, the type aliases of the base classes are used in it
@@ -3518,6 +3523,21 @@ bool Tokenizer::simplifyUsing()
                 else
                     tok1 = blocks.back()->link()->previous();
                 continue;
+            }
+
+            if (tok1->str() == nameToken->str() && tok1 != nameToken) {
+                // a type alias in a function can not be used with a qualification, "C::T" in a member
+                // function of "C" is the type of the class
+                if (isLocalAlias && tok1->strAt(-1) == "::")
+                    continue;
+                // another type alias with this name in an inner scope hides this one up to the end of its scope
+                if (tok1->strAt(-1) == "using" && currentScope1->parent && currentScope1->bodyEnd) {
+                    if (!hiddenEnd)
+                        hiddenEnd = currentScope1->bodyEnd;
+                    continue;
+                }
+                if (hiddenEnd && tok1->strAt(-1) != "::")
+                    continue;
             }
 
             if (inMemberFunc && memberFuncScope) {

@@ -1816,6 +1816,16 @@ private:
         // a type alias at global scope
         const char code8[] = "using Q = int; namespace M { void h() { Q c; { Q d; } } }\n";
         ASSERT_EQUALS("namespace M { void h ( ) { int c ; { int d ; } } }", tok(code8));
+
+        // a type alias in an inner block of a member function does not hide the qualified type alias of the class
+        const char code9[] = "struct C { using T = long; void f(); };\n"
+                             "void C::f() { if (1) { using T = int; C::T x = 0; } }\n";
+        ASSERT_EQUALS("struct C { void f ( ) ; } ; void C :: f ( ) { if ( 1 ) { long x ; x = 0 ; } }", tok(code9));
+
+        // "C::T" in a member function of "C" is a type of the class, not a type alias in the function
+        const char code10[] = "struct C { struct T { }; void f(); };\n"
+                              "void C::f() { if (1) { using T = int; C::T x; T y; } }\n";
+        ASSERT_EQUALS("struct C { struct T { } ; void f ( ) ; } ; void C :: f ( ) { if ( 1 ) { C :: T x ; int y ; } }", tok(code10));
     }
 
     void simplifyUsingBaseClassInMemberFunction() {
