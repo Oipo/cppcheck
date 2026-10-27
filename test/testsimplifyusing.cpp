@@ -1881,6 +1881,10 @@ private:
         // a functional cast is not a declaration
         const char code5[] = "namespace N { using sv = int; int f(int x, int y) { if (x > sv(y)) {} g(x * sv(2)); return sv(3); } }\n";
         ASSERT_EQUALS("namespace N { int f ( int x , int y ) { if ( x > int ( y ) ) { } g ( x * int ( 2 ) ) ; return int ( 3 ) ; } }", tok(code5));
+
+        // an assignment to a qualified variable is not a declaration
+        const char code6[] = "using T = int; namespace N { int T; } void h() { { N::T = 5; T y = 0; } }\n";
+        ASSERT_EQUALS("namespace N { int T ; } void h ( ) { N :: T = 5 ; int y ; y = 0 ; }", tok(code6));
     }
 
     void simplifyUsingMemberFunctionScope() {

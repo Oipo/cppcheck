@@ -3095,7 +3095,8 @@ static bool scopesMatch(const std::string &scope1, const std::string &scope2, co
 // "N::C<T> name{x};"
 static bool isVariableDeclarationName(const Token *tok)
 {
-    if (!Token::Match(tok->next(), ";|=|{|[|(|,"))
+    // a qualified name such as "N::x = 1;" is not declared
+    if (!Token::Match(tok->next(), ";|=|{|[|(|,") || tok->strAt(-1) == "::")
         return false;
     bool hasType = false;
     const Token *prev = tok->previous();
