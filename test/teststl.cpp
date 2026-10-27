@@ -829,6 +829,23 @@ private:
                       "[test.cpp:9:6]: error: Out of bounds access in 'd[10]', if 'd' size is 10 and '10' is 10 [containerOutOfBounds]\n",
                       errout_str());
 
+        // a std::array at namespace level, at global scope and a member
+        check("namespace { std::array<int, 9> a; }\n"
+              "int f() { return a[9]; }\n"
+              "namespace N { std::array<int, 3> b; }\n"
+              "int g() { return N::b[3] + ::N::b[2]; }\n"
+              "std::array<int, 5> c;\n"
+              "int h() { return c[5]; }\n");
+        ASSERT_EQUALS("[test.cpp:2:19]: error: Out of bounds access in 'a[9]', if 'a' size is 9 and '9' is 9 [containerOutOfBounds]\n"
+                      "[test.cpp:4:22]: error: Out of bounds access in 'N::b[3]', if 'N::b' size is 3 and '3' is 3 [containerOutOfBounds]\n"
+                      "[test.cpp:6:19]: error: Out of bounds access in 'c[5]', if 'c' size is 5 and '5' is 5 [containerOutOfBounds]\n",
+                      errout_str());
+
+        check("struct S { std::array<int, 9> a; int f(); };\n"
+              "int S::f() { return a[9] + a[8]; }\n");
+        ASSERT_EQUALS("[test.cpp:2:22]: error: Out of bounds access in 'a[9]', if 'a' size is 9 and '9' is 9 [containerOutOfBounds]\n",
+                      errout_str());
+
         check("struct test_fixed {\n"
               "    std::array<int, 10> array = {};\n"
               "    void index(int i) { array[i]; }\n"

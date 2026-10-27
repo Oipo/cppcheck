@@ -269,6 +269,11 @@ namespace ValueFlow
         }
 
         if (value.isContainerSizeValue() && astIsContainer(tok)) {
+            // N::v
+            if (Token::Match(parent, ":: %name%") && parent->astOperand2() == tok) {
+                setTokenValue(parent, std::move(value), settings);
+                return;
+            }
             // .empty, .size, +"abc", +'a'
             if (Token::Match(parent, "+|==|!=") && parent->astOperand1() && parent->astOperand2()) {
                 for (const Value &value1 : parent->astOperand1()->values()) {

@@ -7990,12 +7990,35 @@ private:
             "",
             isKnownContainerSizeValue(tokenValues(code, "u .", ValueFlow::Value::ValueType::CONTAINER_SIZE), 3));
 
-        // the static size of a container in a namespace is only set until the end of the namespace
+        // the static size of a container in a namespace is set after the end of the namespace
         code = "namespace { std::array<int, 9> a; }\n"
                "int f() { return a[1]; }\n";
-        TODO_ASSERT_EQUALS(
+        ASSERT_EQUALS(
             "",
-            "values.size():0",
+            isKnownContainerSizeValue(tokenValues(code, "a [", ValueFlow::Value::ValueType::CONTAINER_SIZE), 9));
+
+        // ..in a named namespace, with the qualified name
+        code = "namespace N { std::array<int, 9> a; }\n"
+               "int f() { return N::a[1]; }\n";
+        ASSERT_EQUALS(
+            "",
+            isKnownContainerSizeValue(tokenValues(code, "a [", ValueFlow::Value::ValueType::CONTAINER_SIZE), 9));
+        ASSERT_EQUALS(
+            "",
+            isKnownContainerSizeValue(tokenValues(code, ":: a [", ValueFlow::Value::ValueType::CONTAINER_SIZE), 9));
+
+        // ..at global scope
+        code = "std::array<int, 9> a;\n"
+               "int f() { return a[1]; }\n";
+        ASSERT_EQUALS(
+            "",
+            isKnownContainerSizeValue(tokenValues(code, "a [", ValueFlow::Value::ValueType::CONTAINER_SIZE), 9));
+
+        // ..a member that is used in a member function that is implemented outside of the class
+        code = "struct S { std::array<int, 9> a; int f(); };\n"
+               "int S::f() { return a[1]; }\n";
+        ASSERT_EQUALS(
+            "",
             isKnownContainerSizeValue(tokenValues(code, "a [", ValueFlow::Value::ValueType::CONTAINER_SIZE), 9));
     }
 

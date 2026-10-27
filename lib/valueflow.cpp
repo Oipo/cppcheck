@@ -3978,7 +3978,7 @@ namespace {
 
         using Range = std::pair<std::vector<Token*>::const_iterator, std::vector<Token*>::const_iterator>;
 
-        /** The tokens of a variable from start to end (not included), in token order */
+        /** The tokens of a variable from start to end (not included, nullptr is the end of the file), in token order */
         Range range(nonneg int declarationId, const Token* start, const Token* end) const {
             const auto it = mTokens.find(declarationId);
             if (it == mTokens.end())
@@ -3987,6 +3987,8 @@ namespace {
                 return tok->index() < index;
             };
             const auto first = std::lower_bound(it->second.cbegin(), it->second.cend(), start->index(), before);
+            if (!end)
+                return {first, it->second.cend()};
             return {first, std::lower_bound(first, it->second.cend(), end->index(), before)};
         }
 
@@ -6851,7 +6853,7 @@ static void valueFlowContainerSize(const TokenList& tokenlist,
     for (const Variable *var : symboldatabase.variableList()) {
         if (!var)
             continue;
-        if (!var->scope() || !var->scope()->bodyEnd || !var->scope()->bodyStart)
+        if (!var->scope() || (var->scope()->type != ScopeType::eGlobal && (!var->scope()->bodyEnd || !var->scope()->bodyStart)))
             continue;
         if (!var->valueType() || !var->valueType()->container)
             continue;
@@ -6912,7 +6914,9 @@ static void valueFlowContainerSize(const TokenList& tokenlist,
             // the scope of a variable at namespace level is the rest of the file, so only the tokens of the variable are looked at
             if (!constForwardTokens)
                 constForwardTokens.reset(new ConstForwardTokens(tokenlist));
-            valueFlowForwardConst(nameToken->next(), var->scope()->bodyEnd, var, values, settings, *constForwardTokens);
+            // a variable at namespace level or a member is used up to the end of the file
+            const Token* end = var->scope()->isExecutable() ? var->scope()->bodyEnd : nullptr;
+            valueFlowForwardConst(nameToken->next(), end, var, values, settings, *constForwardTokens);
             continue;
         }
 
