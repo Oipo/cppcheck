@@ -1826,6 +1826,14 @@ private:
         const char code10[] = "struct C { struct T { }; void f(); };\n"
                               "void C::f() { if (1) { using T = int; C::T x; T y; } }\n";
         ASSERT_EQUALS("struct C { struct T { } ; void f ( ) ; } ; void C :: f ( ) { if ( 1 ) { C :: T x ; int y ; } }", tok(code10));
+
+        // a type alias in a class hides a type alias at global scope in an out-of-line member function
+        const char code11[] = "using T = int; struct S { using T = float; void f(); }; void S::f() { T x; } T y;\n";
+        ASSERT_EQUALS("struct S { void f ( ) ; } ; void S :: f ( ) { float x ; } int y ;", tok(code11));
+
+        // a type alias in a namespace hides a type alias at global scope when the namespace is opened again
+        const char code12[] = "using T = int; namespace M { using T = float; } namespace M { T y; } T z;\n";
+        ASSERT_EQUALS("namespace M { float y ; } int z ;", tok(code12));
     }
 
     void simplifyUsingBaseClassInMemberFunction() {

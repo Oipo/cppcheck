@@ -3397,6 +3397,23 @@ bool Tokenizer::simplifyUsing()
         const bool isLocalAlias = currentScope->type == ScopeInfo3::Other || currentScope->type == ScopeInfo3::MemberFunction;
         // the end of the scope of another type alias with this name, it hides this one but a qualified name can refer to this one
         const Token *hiddenEnd = nullptr;
+        // the namespaces and classes with another type alias with this name, it hides this one in them
+        std::set<std::string> hidingScopes;
+        // is the scope a namespace or a class that is not in a function
+        const auto isNamedScope = [](const ScopeInfo3 *s) {
+            if (s->type != ScopeInfo3::Namespace && s->type != ScopeInfo3::Record)
+                return false;
+            for (const ScopeInfo3 *p = s->parent; p; p = p->parent) {
+                if (p->type == ScopeInfo3::Other || p->type == ScopeInfo3::MemberFunction)
+                    return false;
+            }
+            return true;
+        };
+        const auto isInHidingScope = [&hidingScopes](const std::string &s) {
+            return std::any_of(hidingScopes.cbegin(), hidingScopes.cend(), [&s](const std::string &h) {
+                return s == h || (s.size() > h.size() + 4 && s.compare(0, h.size(), h) == 0 && s.compare(h.size(), 4, " :: ") == 0);
+            });
+        };
 
         std::string scope1 = currentScope1->fullName;
         bool skip = false; // don't erase type aliases we can't parse
@@ -3535,13 +3552,19 @@ bool Tokenizer::simplifyUsing()
                 // function of "C" is the type of the class
                 if (isLocalAlias && tok1->strAt(-1) == "::")
                     continue;
-                // another type alias with this name in an inner scope hides this one up to the end of its scope
+                // another type alias with this name in an inner scope hides this one. In a namespace or a
+                // class it is hidden wherever the namespace or the class is the scope, as in a member function
+                // that is defined outside of the class or in a namespace that is opened again. In a function
+                // it is hidden up to the end of the block.
                 if (tok1->strAt(-1) == "using" && currentScope1->parent && currentScope1->bodyEnd) {
-                    if (!hiddenEnd)
+                    if (isNamedScope(currentScope1)) {
+                        if (currentScope1->fullName != scope)
+                            hidingScopes.insert(currentScope1->fullName);
+                    } else if (!hiddenEnd)
                         hiddenEnd = currentScope1->bodyEnd;
                     continue;
                 }
-                if (hiddenEnd && tok1->strAt(-1) != "::")
+                if (tok1->strAt(-1) != "::" && (hiddenEnd || isInHidingScope(scope1)))
                     continue;
             }
 
