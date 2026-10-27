@@ -104,6 +104,7 @@ private:
         TEST_CASE(simplifyUsing14877);
         TEST_CASE(simplifyUsingBlocks); // blocks that are skipped when looking for a type alias
         TEST_CASE(simplifyUsingInnerBlocks); // a type alias in a namespace or class is used in an inner block of a function
+        TEST_CASE(simplifyUsingShadowedByVariable);
         TEST_CASE(simplifyUsingMemberFunctionScope);
 
         TEST_CASE(scopeInfo1);
@@ -1815,6 +1816,25 @@ private:
         // a type alias at global scope
         const char code8[] = "using Q = int; namespace M { void h() { Q c; { Q d; } } }\n";
         ASSERT_EQUALS("namespace M { void h ( ) { int c ; { int d ; } } }", tok(code8));
+    }
+
+    void simplifyUsingShadowedByVariable() {
+        // a variable with the name of the type alias hides it up to the end of the block
+        const char code1[] = "namespace N { using sv = int; void f() { sv a; { char sv; g(sv); { h(sv); } } sv b; } }\n";
+        ASSERT_EQUALS("namespace N { void f ( ) { int a ; { char sv ; g ( sv ) ; { h ( sv ) ; } } int b ; } }", tok(code1));
+
+        const char code2[] = "namespace N { using sv = int; void f() { sv a = 1; int* sv = &a; g(sv); } void k() { sv c; } }\n";
+        ASSERT_EQUALS("namespace N { void f ( ) { int a ; a = 1 ; int * sv ; sv = & a ; g ( sv ) ; } void k ( ) { int c ; } }", tok(code2));
+
+        const char code3[] = "namespace N { using sv = int; void f() { std::vector<int> sv{1}; g(sv); } }\n";
+        ASSERT_EQUALS("namespace N { void f ( ) { std :: vector < int > sv { 1 } ; g ( sv ) ; } }", tok(code3));
+
+        const char code4[] = "namespace N { using sv = int; struct S { int v; void f(bool e) { std::string_view sv; g(sv); if (!e) { v = sv; } } }; }\n";
+        ASSERT_EQUALS("namespace N { struct S { int v ; void f ( bool e ) { std :: string_view sv ; g ( sv ) ; if ( ! e ) { v = sv ; } } } ; }", tok(code4));
+
+        // a functional cast is not a declaration
+        const char code5[] = "namespace N { using sv = int; int f(int x, int y) { if (x > sv(y)) {} g(x * sv(2)); return sv(3); } }\n";
+        ASSERT_EQUALS("namespace N { int f ( int x , int y ) { if ( x > int ( y ) ) { } g ( x * int ( 2 ) ) ; return int ( 3 ) ; } }", tok(code5));
     }
 
     void simplifyUsingMemberFunctionScope() {

@@ -3054,6 +3054,31 @@ static bool scopesMatch(const std::string &scope1, const std::string &scope2, co
     return false;
 }
 
+// Is tok the name in a variable declaration statement, as in "T name;", "const T* name = x;" or
+// "N::C<T> name{x};"
+static bool isVariableDeclarationName(const Token *tok)
+{
+    if (!Token::Match(tok->next(), ";|=|{|[|(|,"))
+        return false;
+    bool hasType = false;
+    const Token *prev = tok->previous();
+    while (prev) {
+        if (prev->str() == ">") {
+            prev = prev->findOpeningBracket();
+            if (!prev || !Token::Match(prev->previous(), "%name% <"))
+                return false;
+        } else if (prev->isStandardType() || Token::Match(prev, "auto|signed|unsigned") ||
+                   (prev->isName() && !prev->isKeyword())) {
+            hasType = true;
+        } else if (!Token::Match(prev, "*|&|&&|::|const|volatile|static|constexpr|thread_local")) {
+            break;
+        }
+        prev = prev->previous();
+    }
+    return hasType && (!prev || Token::Match(prev, ";|{|}") || Token::Match(prev->tokAt(-1), "public|protected|private :") ||
+                       Token::simpleMatch(prev->previous(), "for ("));
+}
+
 static unsigned int tokDistance(const Token* tok1, const Token* tok2) { // use when index() is not available yet
     unsigned int dist = 0;
     const Token* tok = tok1;
@@ -3433,6 +3458,14 @@ bool Tokenizer::simplifyUsing()
                 }
                 continue;
             }
+            // a variable with the name of the type alias hides it up to the end of the block
+            if (tok1->str() == nameToken->str() && !blocks.empty() &&
+                !(memberFuncEnd && memberFuncEnd->str() == "{") &&
+                isVariableDeclarationName(tok1)) {
+                tok1 = blocks.back()->link()->previous();
+                continue;
+            }
+
             if (inMemberFunc && memberFuncScope) {
                 if (!usingMatch(nameToken, scope, tok1, scope1, currentScope1, memberFuncScope))
                     continue;
