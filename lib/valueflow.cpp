@@ -123,6 +123,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -5655,9 +5656,11 @@ static void valueFlowForLoop(const TokenList &tokenlist, const SymbolDatabase& s
     }
 }
 
-template<class Key, class F>
-static bool productParams(const Settings& settings, const std::unordered_map<Key, std::list<ValueFlow::Value>>& vars, F f)
+// The order of vars decides which combinations are kept when there are too many of them
+template<class Params, class F>
+static bool productParams(const Settings& settings, const Params& vars, F f)
 {
+    using Key = typename std::remove_const<typename Params::value_type::first_type>::type;
     using Args = std::vector<std::unordered_map<Key, ValueFlow::Value>>;
     Args args(1);
     // Compute cartesian product of all arguments
@@ -5719,7 +5722,7 @@ static void valueFlowInjectParameter(const TokenList& tokenlist,
                                      ErrorLogger& errorLogger,
                                      const Settings& settings,
                                      const Scope* functionScope,
-                                     const std::unordered_map<const Variable*, std::list<ValueFlow::Value>>& vars)
+                                     const std::vector<std::pair<const Variable*, std::list<ValueFlow::Value>>>& vars)
 {
     const bool r = productParams(settings, vars, [&](const std::unordered_map<const Variable*, ValueFlow::Value>& arg) {
         auto a = makeMultiValueFlowAnalyzer(arg, settings);
@@ -5910,7 +5913,8 @@ static void valueFlowSubFunction(const TokenList& tokenlist,
                 continue;
 
             id++;
-            std::unordered_map<const Variable*, std::list<ValueFlow::Value>> argvars;
+            // In the order of the arguments, so the analysed combinations do not depend on the heap addresses
+            std::vector<std::pair<const Variable*, std::list<ValueFlow::Value>>> argvars;
             // TODO: Rewrite this. It does not work well to inject 1 argument at a time.
             const std::vector<const Token*>& callArguments = getArguments(tok);
             for (int argnr = 0U; argnr < callArguments.size(); ++argnr) {
@@ -5955,7 +5959,7 @@ static void valueFlowSubFunction(const TokenList& tokenlist,
                 // passed values are not "known"..
                 lowerToPossible(argvalues);
 
-                argvars[argvar] = std::move(argvalues);
+                argvars.emplace_back(argvar, std::move(argvalues));
             }
             valueFlowInjectParameter(tokenlist, errorLogger, settings, calledFunctionScope, argvars);
         }

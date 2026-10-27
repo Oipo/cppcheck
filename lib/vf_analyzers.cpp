@@ -46,6 +46,8 @@
 #include <list>
 #include <set>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 static bool isDereferenceOp(const Token* tok)
 {
@@ -960,12 +962,19 @@ struct MultiValueFlowAnalyzer : ValueFlowAnalyzer {
 
     MultiValueFlowAnalyzer(const std::unordered_map<const Variable*, ValueFlow::Value>& args, const Settings& set)
         : ValueFlowAnalyzer(set) {
-        for (const auto& p:args) {
-            const auto declId = p.first->declarationId();
+        // Insert in the order of the declarations, so the order of the maps does not depend on the heap addresses
+        std::vector<const std::pair<const Variable* const, ValueFlow::Value>*> sortedArgs;
+        for (const auto& p:args)
+            sortedArgs.push_back(&p);
+        std::sort(sortedArgs.begin(), sortedArgs.end(), [](const std::pair<const Variable* const, ValueFlow::Value>* a, const std::pair<const Variable* const, ValueFlow::Value>* b) {
+            return a->first->declarationId() < b->first->declarationId();
+        });
+        for (const auto* p:sortedArgs) {
+            const auto declId = p->first->declarationId();
             if (declId == 0)
                 continue; // TODO: should never happen?
-            values[declId] = p.second;
-            vars[declId] = p.first;
+            values[declId] = p->second;
+            vars[declId] = p->first;
         }
     }
 

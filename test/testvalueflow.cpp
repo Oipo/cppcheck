@@ -5367,6 +5367,30 @@ private:
                "    foo(NULL, NULL);\n"
                "}\n";
         ASSERT_EQUALS(false, testValueOfX(code, 5U, 0));
+
+        // more combinations of argument values than maxSubFunctionArgs: the values of the first
+        // argument are combined first, so both values of a are kept
+        {
+            /*const*/ Settings s(settings);
+            s.vfOptions.maxSubFunctionArgs = 8;
+            code = "int f(int a, int b) {\n"
+                   "    return a + b;\n"
+                   "}\n"
+                   "int g(int c, int d) {\n"
+                   "    int y = 0;\n"
+                   "    if (c == 1) y = 1;\n"
+                   "    if (c == 2) y = 2;\n"
+                   "    if (c == 3) y = 3;\n"
+                   "    if (c == 4) y = 4;\n"
+                   "    if (c == 5) y = 5;\n"
+                   "    if (c == 6) y = 6;\n"
+                   "    return f(d ? 10 : 20, y);\n"
+                   "}\n";
+            std::list<ValueFlow::Value> values = tokenValues(code, "a +", &s);
+            ASSERT_EQUALS(2U, values.size());
+            ASSERT_EQUALS(10, values.front().intvalue);
+            ASSERT_EQUALS(20, values.back().intvalue);
+        }
     }
 
     void valueFlowFunctionReturn() {
