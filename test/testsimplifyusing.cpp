@@ -1848,6 +1848,20 @@ private:
                              "D::D() : m{ {1} }, n([] { return 2; }()) { X x = 0; }\n";
         ASSERT_EQUALS("struct B { } ; struct D : B { D ( ) ; int m [ 1 ] ; int n ; } ; "
                       "D :: D ( ) : m { { 1 } } , n ( [ ] { return 2 ; } ( ) ) { int x ; x = 0 ; }", tok(code4));
+
+        // a constructor with a qualified base class initializer
+        const char code5[] = "namespace N { struct B { using X = int; B(int); }; }\n"
+                             "struct D : N::B { D(); int m; };\n"
+                             "D::D() : N::B{1}, m(2) { X x = 0; }\n";
+        ASSERT_EQUALS("namespace N { struct B { B ( int ) ; } ; } struct D : N :: B { D ( ) ; int m ; } ; "
+                      "D :: D ( ) : N :: B { 1 } , m ( 2 ) { int x ; x = 0 ; }", tok(code5));
+
+        // the body of a constructor with a qualified base class initializer is not in the namespace of the base class
+        const char code6[] = "namespace N { struct B { B(int); }; using X = long; }\n"
+                             "struct D : N::B { D(); };\n"
+                             "D::D() : N::B{1} { X x = 0; }\n";
+        ASSERT_EQUALS("namespace N { struct B { B ( int ) ; } ; } struct D : N :: B { D ( ) ; } ; "
+                      "D :: D ( ) : N :: B { 1 } { X x ; x = 0 ; }", tok(code6));
     }
 
     void simplifyUsingShadowedByVariable() {

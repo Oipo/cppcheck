@@ -1200,6 +1200,30 @@ void Tokenizer::simplifyTypedef()
     simplifyTypedefCpp();
 }
 
+// Is tok the "(" or "{" of the initializer of a member or a base class in a constructor, as in
+// ": m(1)", ", N::B{1}" or ": B<T>(x)"? Returns the ":" or "," before the name, otherwise nullptr.
+static const Token *initializerStart(const Token *tok)
+{
+    const Token *prev = tok->previous();
+    for (;;) {
+        if (Token::simpleMatch(prev, ">")) {
+            prev = prev->findOpeningBracket();
+            prev = prev ? prev->previous() : nullptr;
+        }
+        if (!prev || !prev->isName())
+            return nullptr;
+        if (!Token::simpleMatch(prev->previous(), "::"))
+            break;
+        prev = prev->previous();
+        // global qualification
+        if (!Token::Match(prev->previous(), "%name%|>"))
+            break;
+        prev = prev->previous();
+    }
+    prev = prev->previous();
+    return Token::Match(prev, ":|,") ? prev : nullptr;
+}
+
 // Is the '(' the start of the arguments of a member function that is implemented outside of its class
 static bool isQualifiedFunctionHead(const Token *tok)
 {
@@ -2737,7 +2761,7 @@ namespace {
             // check for member function
             else if (tok->str() == "{") {
                 bool added = false;
-                Token *tok1 = tok;
+                const Token *tok1 = tok;
                 while (Token::Match(tok1->previous(), "const|volatile|final|override|&|&&|noexcept"))
                     tok1 = tok1->previous();
                 if (tok1->previous() && (tok1->strAt(-1) == ")" || tok->strAt(-1) == "}")) {
@@ -2750,8 +2774,8 @@ namespace {
                             return;
                         tok1 = tok1->linkAt(-1);
                     } else {
-                        while (Token::Match(tok1->tokAt(-2), ":|, %name%")) {
-                            tok1 = tok1->tokAt(-2);
+                        while (const Token *initStart = initializerStart(tok1)) {
+                            tok1 = initStart;
                             if (tok1->strAt(-1) != ")" && tok1->strAt(-1) != "}")
                                 return;
                             tok1 = tok1->linkAt(-1);
@@ -3018,12 +3042,13 @@ namespace {
             return nullptr;
         const Token *end = tok->link()->next();
         while (end) {
-            if (end->str() == "{" && !Token::Match(end->tokAt(-2), ":|, %name%"))
+            const bool isInitializer = Token::Match(end, "(|{") && initializerStart(end);
+            if (end->str() == "{" && !isInitializer)
                 return end;
             if (end->str() == ";")
                 break;
             // skip the initializer of a member or a base class
-            if (Token::Match(end, "(|{") && end->link() && Token::Match(end->tokAt(-2), ":|, %name%"))
+            if (isInitializer && end->link())
                 end = end->link();
             end = end->next();
         }
