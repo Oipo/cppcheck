@@ -4637,6 +4637,27 @@ private:
                              "T t;\n";
         ASSERT_EQUALS("struct C { static int f ( ) ; int g ( ) ; } ; int C :: g ( ) { return x ? C :: f ( ) : 0 ; } T t ;",
                       simplifyTypedef(code3));
+
+        // after a binary operator in the conditional expression
+        const char code4[] = "struct C { typedef int T; static int f(); void g(); };\n"
+                             "void C::g() { { int a = 1 ? 2 * C::f() : x; } }\n"
+                             "T t;\n";
+        ASSERT_EQUALS("struct C { static int f ( ) ; void g ( ) ; } ; void C :: g ( ) { { int a = 1 ? 2 * C :: f ( ) : x ; } } T t ;",
+                      simplifyTypedef(code4));
+
+        // in a function that is not a member function
+        const char code5[] = "struct C { typedef int T; static int f(); };\n"
+                             "void g() { { int a = 1 ? 2 * C::f() : x; } }\n"
+                             "T t;\n";
+        ASSERT_EQUALS("struct C { static int f ( ) ; } ; void g ( ) { { int a = 1 ? 2 * C :: f ( ) : x ; } } T t ;",
+                      simplifyTypedef(code5));
+
+        // the typedef is used in the member function after the conditional expression
+        const char code6[] = "struct C { typedef int T; static int f(); void g(); };\n"
+                             "void C::g() { { int a = 1 ? 2 * C::f() : x; } T b; }\n"
+                             "T t;\n";
+        ASSERT_EQUALS("struct C { static int f ( ) ; void g ( ) ; } ; void C :: g ( ) { { int a = 1 ? 2 * C :: f ( ) : x ; } int b ; } T t ;",
+                      simplifyTypedef(code6));
     }
 
     void simplifyTypedefOriginalName1() {

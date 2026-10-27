@@ -1866,7 +1866,7 @@ void Tokenizer::simplifyTypedefCpp()
                         // check for end of member function
                         if (inMemberFunc) {
                             --memberScope;
-                            if (memberScope == 0)
+                            if (memberScope <= 0)
                                 inMemberFunc = false;
                         }
                         inEnum = false;
@@ -1903,9 +1903,10 @@ void Tokenizer::simplifyTypedefCpp()
                             while (Token::Match(func->tokAt(offset - 2), "%name% ::"))
                                 offset -= 2;
                             // check for available and matching class name, the function is not
-                            // called in an expression such as "x ? C::f() : y"
+                            // called in an expression such as "x ? C::f() : y", a member function is
+                            // not defined in a member function
                             const Token *beforeName = func->tokAt(offset - 1);
-                            if (spaceInfo.size() > 1 && classLevel < spaceInfo.size() &&
+                            if (!inMemberFunc && spaceInfo.size() > 1 && classLevel < spaceInfo.size() &&
                                 func->strAt(offset) == spaceInfo[classLevel].className &&
                                 (!beforeName ||
                                  (Token::Match(beforeName, "%name%|;|{|}|*|&|&&|>|::") &&
