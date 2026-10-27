@@ -783,9 +783,10 @@ static bool isTemplateInstantion(const Token* tok)
         return true;
     if (Token::Match(tok->tokAt(-2), "[,:] private|protected|public %name% ::|<"))
         return true;
-    if (Token::Match(tok->tokAt(-1), "(|{|}|;|=|>|<<|:|.|*|&|return|<|,|!|[ %name% ::|<|("))
+    if (Token::Match(tok->tokAt(-1), "%cop%|?|(|{|}|;|=|:|.|return|,|[ %name% ::|<|("))
         return true;
-    return Token::Match(tok->tokAt(-2), "(|{|}|;|=|<<|:|.|*|&|return|<|,|!|[ :: %name% ::|<|(");
+    // in "A<T>::f<U>" the "f" is a member of the instantiation
+    return Token::Match(tok->tokAt(-2), "%cop%|?|(|{|}|;|=|:|.|return|,|[ :: %name% ::|<|(") && tok->strAt(-2) != ">";
 }
 
 void TemplateSimplifier::getTemplateInstantiations()

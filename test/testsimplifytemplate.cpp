@@ -317,6 +317,7 @@ private:
         TEST_CASE(requires6);
         TEST_CASE(requires7);
         TEST_CASE(requiresClass);
+        TEST_CASE(instantiationAfterOperator);
 
         TEST_CASE(explicitBool1);
         TEST_CASE(explicitBool2);
@@ -6784,6 +6785,56 @@ private:
                                  "R<int> r ; "
                                  "struct R<int> { int r ; } ;";
         ASSERT_EQUALS(expected2, tok(code2));
+    }
+
+    void instantiationAfterOperator() {
+        {
+            // an explicit specialization does not stop other instantiations
+            const char code[] = "template<class T> int f(T) { return 0; }\n"
+                                "template<> int f<char>(char) { return 1; }\n"
+                                "int g() { return f<char>(1) + f<int>(1); }\n";
+            const char expected[] = "int f<char> ( char ) ; "
+                                    "int f<int> ( int ) ; "
+                                    "int f<char> ( char ) { return 1 ; } "
+                                    "int g ( ) { return f<char> ( 1 ) + f<int> ( 1 ) ; } "
+                                    "int f<int> ( int ) { return 0 ; }";
+            ASSERT_EQUALS(expected, tok(code));
+        }
+        {
+            const char code[] = "template<class T> int f(T) { return 0; }\n"
+                                "template<> int f<char>(char) { return 1; }\n"
+                                "int g() { return 1 + f<int>(1); }\n";
+            const char expected[] = "int f<char> ( char ) ; "
+                                    "int f<int> ( int ) ; "
+                                    "int f<char> ( char ) { return 1 ; } "
+                                    "int g ( ) { return 1 + f<int> ( 1 ) ; } "
+                                    "int f<int> ( int ) { return 0 ; }";
+            ASSERT_EQUALS(expected, tok(code));
+        }
+        {
+            const char code[] = "template<class T> int f(T) { return 0; }\n"
+                                "int g(bool b) { return b ? f<int>(1) : -f<long>(2); }\n";
+            const char expected[] = "int f<int> ( int ) ; int f<long> ( long ) ; "
+                                    "int g ( bool b ) { return b ? ( f<int> ( 1 ) ) : - f<long> ( 2 ) ; } "
+                                    "int f<int> ( int ) { return 0 ; } int f<long> ( long ) { return 0 ; }";
+            ASSERT_EQUALS(expected, tok(code));
+        }
+        {
+            const char code[] = "namespace N { template<class T> int f(T) { return 0; } }\n"
+                                "bool g(int a) { return a == N::f<int>(1) && !N::f<char>(2) || a < ::N::f<short>(3); }\n";
+            const char expected[] = "namespace N { int f<int> ( int ) ; int f<char> ( char ) ; int f<short> ( short ) ; } "
+                                    "bool g ( int a ) { return a == N :: f<int> ( 1 ) && ! N :: f<char> ( 2 ) || a < :: N :: f<short> ( 3 ) ; } "
+                                    "int N :: f<int> ( int ) { return 0 ; } int N :: f<char> ( char ) { return 0 ; } int N :: f<short> ( short ) { return 0 ; }";
+            ASSERT_EQUALS(expected, tok(code));
+        }
+        {
+            const char code[] = "template<class T> struct S { T s; };\n"
+                                "int g(int a) { return a * S<int>{1}.s; }\n";
+            const char expected[] = "struct S<int> ; "
+                                    "int g ( int a ) { return a * S<int> { 1 } . s ; } "
+                                    "struct S<int> { int s ; } ;";
+            ASSERT_EQUALS(expected, tok(code));
+        }
     }
 
     void explicitBool1() {
