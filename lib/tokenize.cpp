@@ -3092,14 +3092,15 @@ static bool scopesMatch(const std::string &scope1, const std::string &scope2, co
 }
 
 // Is tok the name in a variable declaration statement, as in "T name;", "const T* name = x;" or
-// "N::C<T> name{x};"
-static bool isVariableDeclarationName(const Token *tok)
+// "N::C<T> name{x};"? forParen is set to the "(" of a for loop when the variable is declared in it.
+static bool isVariableDeclarationName(Token *tok, Token *&forParen)
 {
+    forParen = nullptr;
     // a qualified name such as "N::x = 1;" is not declared
     if (!Token::Match(tok->next(), ";|=|{|[|(|,") || tok->strAt(-1) == "::")
         return false;
     bool hasType = false;
-    const Token *prev = tok->previous();
+    Token *prev = tok->previous();
     while (prev) {
         if (prev->str() == ">") {
             prev = prev->findOpeningBracket();
@@ -3113,8 +3114,13 @@ static bool isVariableDeclarationName(const Token *tok)
         }
         prev = prev->previous();
     }
-    return hasType && (!prev || Token::Match(prev, ";|{|}") || Token::Match(prev->tokAt(-1), "public|protected|private :") ||
-                       Token::simpleMatch(prev->previous(), "for ("));
+    if (!hasType)
+        return false;
+    if (prev && Token::simpleMatch(prev->previous(), "for (")) {
+        forParen = prev;
+        return true;
+    }
+    return !prev || Token::Match(prev, ";|{|}") || Token::Match(prev->tokAt(-1), "public|protected|private :");
 }
 
 static unsigned int tokDistance(const Token* tok1, const Token* tok2) { // use when index() is not available yet
@@ -3501,11 +3507,16 @@ bool Tokenizer::simplifyUsing()
                 }
                 continue;
             }
-            // a variable with the name of the type alias hides it up to the end of the block
+            // a variable with the name of the type alias hides it up to the end of the block, or
+            // up to the end of the for loop it is declared in
+            Token *forParen = nullptr;
             if (tok1->str() == nameToken->str() && !blocks.empty() &&
                 !(memberFuncEnd && memberFuncEnd->str() == "{") &&
-                isVariableDeclarationName(tok1)) {
-                tok1 = blocks.back()->link()->previous();
+                isVariableDeclarationName(tok1, forParen)) {
+                if (forParen && Token::simpleMatch(forParen->link(), ") {"))
+                    tok1 = forParen->link()->linkAt(1);
+                else
+                    tok1 = blocks.back()->link()->previous();
                 continue;
             }
 
