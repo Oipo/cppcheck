@@ -315,6 +315,8 @@ private:
         TEST_CASE(requires4);
         TEST_CASE(requires5);
         TEST_CASE(requires6);
+        TEST_CASE(requires7);
+        TEST_CASE(requiresClass);
 
         TEST_CASE(explicitBool1);
         TEST_CASE(explicitBool2);
@@ -6748,6 +6750,40 @@ private:
                                 "void g ( ) const { } "
                                 "} ;";
         ASSERT_EQUALS(expected, tok(code));
+    }
+
+    void requires7() { // requires expression without a parameter list
+        const char code[] = "template <class T>\n"
+                            "  requires requires { T(); }\n"
+                            "  T add(T a, T b) { return a + b; }\n"
+                            "add<int>(123,456);\n";
+        const char expected[] = "int add<int> ( int a , int b ) ; add<int> ( 123 , 456 ) ; int add<int> ( int a , int b ) { return a + b ; }";
+        ASSERT_EQUALS(expected, tok(code));
+
+        const char code2[] = "template <class T>\n"
+                             "  requires requires { T(); } && my_concept<T>\n"
+                             "  T add(T a, T b) { return a + b; }\n"
+                             "add<int>(123,456);\n";
+        ASSERT_EQUALS(expected, tok(code2));
+    }
+
+    void requiresClass() {
+        const char code[] = "template<class T> requires requires { T(); } struct R { T r; };\n"
+                            "template<class T> struct A { T a; };\n"
+                            "A<int> x; R<int> r;\n";
+        const char expected[] = "struct R<int> ; "
+                                "struct A<int> ; "
+                                "A<int> x ; R<int> r ; "
+                                "struct A<int> { int a ; } ; "
+                                "struct R<int> { int r ; } ;";
+        ASSERT_EQUALS(expected, tok(code));
+
+        const char code2[] = "template<class T> requires requires { typename T::type; } struct R { T r; };\n"
+                             "R<int> r;\n";
+        const char expected2[] = "struct R<int> ; "
+                                 "R<int> r ; "
+                                 "struct R<int> { int r ; } ;";
+        ASSERT_EQUALS(expected2, tok(code2));
     }
 
     void explicitBool1() {
