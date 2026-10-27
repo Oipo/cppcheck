@@ -1778,6 +1778,23 @@ void TemplateSimplifier::expandTemplate(
     bool inTemplateDefinition = false;
     const Token *startOfTemplateDeclaration = nullptr;
     const Token *endOfTemplateDefinition = nullptr;
+    // The last "template", its parameters are counted when inTemplateDefinition is needed. Once the
+    // end of the template definition is known, that is only at the declaration, at a member function
+    // and at that end, not at every "template" in the token list.
+    const Token *uncountedTemplate = nullptr;
+    const auto isInTemplateDefinition = [&]() {
+        if (uncountedTemplate) {
+            if (Token::simpleMatch(uncountedTemplate->next(), "<")) {
+                std::vector<const Token *> localTypeParametersInDeclaration;
+                getTemplateParametersInDeclaration(uncountedTemplate->tokAt(2), localTypeParametersInDeclaration);
+                inTemplateDefinition = localTypeParametersInDeclaration.size() == typeParametersInDeclaration.size(); // Partial specialization
+            } else {
+                inTemplateDefinition = false; // Only template instantiation
+            }
+            uncountedTemplate = nullptr;
+        }
+        return inTemplateDefinition;
+    };
     const Token * const templateDeclarationNameToken = templateDeclaration.nameToken();
     const Token * const templateDeclarationToken = templateDeclaration.paramEnd();
     const bool isClass = templateDeclaration.isClass();
@@ -2065,14 +2082,14 @@ void TemplateSimplifier::expandTemplate(
         // functions implemented outside of the class definition (they are in a statement with
         // "template") are of interest. The end of the template definition is not inside a block
         // that starts after the template definition starts.
-        if ((!inTemplateDefinition || endOfTemplateDefinition) && isBlockWithoutTemplate(tok3)) {
+        if ((endOfTemplateDefinition || !isInTemplateDefinition()) && isBlockWithoutTemplate(tok3)) {
             tok3 = tok3->link();
             continue;
         }
         if (tok3->str() == "{" && tok3->link())
             blocks.push_back(tok3);
 
-        if (inTemplateDefinition) {
+        if ((!endOfTemplateDefinition || tok3 == endOfTemplateDefinition) && isInTemplateDefinition()) {
             if (!endOfTemplateDefinition) {
                 if (isVariable) {
                     Token *temp = tok3->findClosingBracket();
@@ -2094,13 +2111,7 @@ void TemplateSimplifier::expandTemplate(
         }
 
         if (tok3->str()=="template") {
-            if (tok3->next() && tok3->strAt(1)=="<") {
-                std::vector<const Token *> localTypeParametersInDeclaration;
-                getTemplateParametersInDeclaration(tok3->tokAt(2), localTypeParametersInDeclaration);
-                inTemplateDefinition = localTypeParametersInDeclaration.size() == typeParametersInDeclaration.size(); // Partial specialization
-            } else {
-                inTemplateDefinition = false; // Only template instantiation
-            }
+            uncountedTemplate = tok3;
             startOfTemplateDeclaration = tok3;
         }
         if (Token::Match(tok3, "(|["))
@@ -2110,6 +2121,8 @@ void TemplateSimplifier::expandTemplate(
 
         // Start of template..
         if (tok3 == templateDeclarationToken) {
+            // count before the declaration is changed
+            isInTemplateDefinition();
             changedStart = tok3;
             tok3 = tok3->next();
             if (tok3->str() == "static")
@@ -2117,9 +2130,9 @@ void TemplateSimplifier::expandTemplate(
         }
 
         // member function implemented outside class definition
-        else if (inTemplateDefinition &&
-                 Token::Match(tok3, "%name% <") &&
+        else if (Token::Match(tok3, "%name% <") &&
                  templateInstantiation.name() == tok3->str() &&
+                 isInTemplateDefinition() &&
                  instantiateMatch(tok3, typeParametersInDeclaration.size(), templateDeclaration.isVariadic(), ":: ~| %name% (")) {
             // there must be template..
             bool istemplate = false;
