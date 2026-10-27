@@ -1899,6 +1899,10 @@ private:
         // a variable of a for loop hides the type alias up to the end of the loop
         const char code7[] = "using size = int; void f() { { for (int size = 0; size < 3; ++size) {} size x = 0; } }\n";
         ASSERT_EQUALS("void f ( ) { for ( int size = 0 ; size < 3 ; ++ size ) { } int x ; x = 0 ; }", tok(code7));
+
+        // a variable of a for loop hides a type alias in the same block
+        const char code8[] = "void g(int n) { using T = int; for (int T = 0; T < n; ++T) {} T x = 0; }\n";
+        ASSERT_EQUALS("void g ( int n ) { for ( int T = 0 ; T < n ; ++ T ) { } int x ; x = 0 ; }", tok(code8));
     }
 
     void simplifyUsingMemberFunctionScope() {

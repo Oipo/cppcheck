@@ -3515,14 +3515,19 @@ bool Tokenizer::simplifyUsing()
             // a variable with the name of the type alias hides it up to the end of the block, or
             // up to the end of the for loop it is declared in
             Token *forParen = nullptr;
-            if (tok1->str() == nameToken->str() && !blocks.empty() &&
+            if (tok1->str() == nameToken->str() &&
                 !(memberFuncEnd && memberFuncEnd->str() == "{") &&
                 isVariableDeclarationName(tok1, forParen)) {
-                if (forParen && Token::simpleMatch(forParen->link(), ") {"))
+                // the block of a type alias in a function is not in blocks
+                const Token *blockEnd = !blocks.empty() ? blocks.back()->link() : isLocalAlias ? currentScope->bodyEnd : nullptr;
+                if (forParen && Token::simpleMatch(forParen->link(), ") {")) {
                     tok1 = forParen->link()->linkAt(1);
-                else
-                    tok1 = blocks.back()->link()->previous();
-                continue;
+                    continue;
+                }
+                if (blockEnd) {
+                    tok1 = const_cast<Token *>(blockEnd->previous());
+                    continue;
+                }
             }
 
             if (tok1->str() == nameToken->str() && tok1 != nameToken) {
