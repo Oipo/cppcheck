@@ -3014,6 +3014,9 @@ namespace {
                 return end;
             if (end->str() == ";")
                 break;
+            // skip the initializer of a member or a base class
+            if (Token::Match(end, "(|{") && end->link() && Token::Match(end->tokAt(-2), ":|, %name%"))
+                end = end->link();
             end = end->next();
         }
         return nullptr;
@@ -3390,9 +3393,14 @@ bool Tokenizer::simplifyUsing()
                 }
                 scope1 = currentScope1->fullName;
                 if (inMemberFunc && memberFuncEnd && tok1 == memberFuncEnd) {
-                    inMemberFunc = false;
-                    memberFuncScope = nullptr;
-                    memberFuncEnd = nullptr;
+                    if (tok1->str() == "{" && tok1->link()) {
+                        // the body of the member function, the type aliases of the base classes are used in it
+                        memberFuncEnd = tok1->link();
+                    } else {
+                        inMemberFunc = false;
+                        memberFuncScope = nullptr;
+                        memberFuncEnd = nullptr;
+                    }
                 }
                 if (tok1->str() == "{" && tok1->link()) {
                     blocks.push_back(tok1);
@@ -3400,7 +3408,7 @@ bool Tokenizer::simplifyUsing()
                         summarizeBlocks(tok1, tok1->link()->next());
                     // skip the block when there is nothing to see in it, the end of the block is seen
                     if (tok1->blockSummary() == BlockNames && (tok1->blockNames() & nameBit) == 0 &&
-                        (!memberFuncEnd || memberFuncEnd == endToken))
+                        (!memberFuncEnd || memberFuncEnd == endToken || memberFuncEnd->str() == "}"))
                         tok1 = tok1->link()->previous();
                 } else if (!blocks.empty() && tok1 == blocks.back()->link()) {
                     blocks.pop_back();

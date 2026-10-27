@@ -104,6 +104,7 @@ private:
         TEST_CASE(simplifyUsing14877);
         TEST_CASE(simplifyUsingBlocks); // blocks that are skipped when looking for a type alias
         TEST_CASE(simplifyUsingInnerBlocks); // a type alias in a namespace or class is used in an inner block of a function
+        TEST_CASE(simplifyUsingBaseClassInMemberFunction);
         TEST_CASE(simplifyUsingShadowedByVariable);
         TEST_CASE(simplifyUsingMemberFunctionScope);
 
@@ -1763,9 +1764,8 @@ private:
         const char code5[] = "struct B { using X = int; };\n"
                              "struct D : B { D(); int m[1]; X n; };\n"
                              "D::D() : m{ {1} } { X x = 0; }\n";
-        TODO_ASSERT_EQUALS("struct B { } ; struct D : B { D ( ) ; int m [ 1 ] ; int n ; } ; D :: D ( ) : m { { 1 } } { int x ; x = 0 ; }",
-                           "struct B { } ; struct D : B { D ( ) ; int m [ 1 ] ; int n ; } ; D :: D ( ) : m { { 1 } } { X x ; x = 0 ; }",
-                           tok(code5));
+        ASSERT_EQUALS("struct B { } ; struct D : B { D ( ) ; int m [ 1 ] ; int n ; } ; D :: D ( ) : m { { 1 } } { int x ; x = 0 ; }",
+                      tok(code5));
 
         // "using namespace" in a block that is not a scope
         const char code6[] = "namespace N { using U = int; }\n"
@@ -1816,6 +1816,38 @@ private:
         // a type alias at global scope
         const char code8[] = "using Q = int; namespace M { void h() { Q c; { Q d; } } }\n";
         ASSERT_EQUALS("namespace M { void h ( ) { int c ; { int d ; } } }", tok(code8));
+    }
+
+    void simplifyUsingBaseClassInMemberFunction() {
+        // the type alias of the base class in the body of an out-of-line member function
+        const char code1[] = "struct B { using X = int; };\n"
+                             "struct D : B { void f(X); };\n"
+                             "void D::f(X y) { X x = 0; }\n";
+        ASSERT_EQUALS("struct B { } ; struct D : B { void f ( int ) ; } ; void D :: f ( int y ) { int x ; x = 0 ; }", tok(code1));
+
+        // in inner blocks, the type alias is not used after the member function
+        const char code2[] = "struct B { using X = int; };\n"
+                             "struct D : B { void f(); void g(); };\n"
+                             "void D::f() { { X a; } if (1) { X b; } }\n"
+                             "void D::g() { }\n"
+                             "X c;\n";
+        ASSERT_EQUALS("struct B { } ; struct D : B { void f ( ) ; void g ( ) ; } ; "
+                      "void D :: f ( ) { { int a ; } if ( 1 ) { int b ; } } "
+                      "void D :: g ( ) { } "
+                      "X c ;", tok(code2));
+
+        // the base class is in a namespace
+        const char code3[] = "namespace N { struct B { using X = int; }; }\n"
+                             "struct D : N::B { void f(); };\n"
+                             "void D::f() { X x = 0; }\n";
+        ASSERT_EQUALS("namespace N { struct B { } ; } struct D : N :: B { void f ( ) ; } ; void D :: f ( ) { int x ; x = 0 ; }", tok(code3));
+
+        // a constructor with initializers that have braces and parentheses
+        const char code4[] = "struct B { using X = int; };\n"
+                             "struct D : B { D(); int m[1]; int n; };\n"
+                             "D::D() : m{ {1} }, n([] { return 2; }()) { X x = 0; }\n";
+        ASSERT_EQUALS("struct B { } ; struct D : B { D ( ) ; int m [ 1 ] ; int n ; } ; "
+                      "D :: D ( ) : m { { 1 } } , n ( [ ] { return 2 ; } ( ) ) { int x ; x = 0 ; }", tok(code4));
     }
 
     void simplifyUsingShadowedByVariable() {
