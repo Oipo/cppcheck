@@ -255,6 +255,7 @@ private:
 
         TEST_CASE(simplifyTypedefMacro);
         TEST_CASE(simplifyTypedefBlocks);
+        TEST_CASE(simplifyTypedefNamespaceOpenedAgain);
 
         TEST_CASE(simplifyTypedefOriginalName1);
         TEST_CASE(simplifyTypedefOriginalName2);
@@ -4574,9 +4575,8 @@ private:
         const char code4[] = "namespace N { namespace K { typedef int T; typedef int U; } }\n"
                              "namespace N { namespace K { int z; } }\n"
                              "N::K::U w;\n";
-        TODO_ASSERT_EQUALS("namespace N { namespace K { } } namespace N { namespace K { int z ; } } int w ;",
-                           "namespace N { namespace K { } } namespace N { namespace K { int z ; } } N :: K :: U w ;",
-                           simplifyTypedef(code4));
+        ASSERT_EQUALS("namespace N { namespace K { } } namespace N { namespace K { int z ; } } int w ;",
+                      simplifyTypedef(code4));
 
         // a conditional expression with a qualified function call in a member function
         const char code5[] = "struct C { typedef int T; void f(); };\n"
@@ -4585,6 +4585,31 @@ private:
         TODO_ASSERT_EQUALS("struct C { void f ( ) ; } ; void C :: f ( ) { { int a = 1 ? C :: f ( ) : x ; } } T t ;",
                            "struct C { void f ( ) ; } ; void C :: f ( ) { { int a = 1 ? C :: f ( ) : x ; } } int t ;",
                            simplifyTypedef(code5));
+    }
+
+    void simplifyTypedefNamespaceOpenedAgain() {
+        // the second typedef is used in the namespace that is opened again
+        const char code1[] = "namespace N { namespace K { typedef int T; typedef int U; } }\n"
+                             "namespace N { namespace K { int z; } }\n"
+                             "N::K::U w;\n"
+                             "namespace N { namespace K { U v; } }\n";
+        ASSERT_EQUALS("namespace N { namespace K { } } namespace N { namespace K { int z ; } } int w ; namespace N { namespace K { int v ; } }",
+                      simplifyTypedef(code1));
+
+        // three typedefs, the namespace is opened twice
+        const char code2[] = "namespace N { typedef int T; typedef long U; typedef short V; }\n"
+                             "namespace N { int z; }\n"
+                             "namespace N { T t; U u; V v; }\n"
+                             "N::T t2; N::V v2;\n";
+        ASSERT_EQUALS("namespace N { } namespace N { int z ; } namespace N { int t ; long u ; short v ; } int t2 ; short v2 ;",
+                      simplifyTypedef(code2));
+
+        // the typedefs are not used outside of the namespace without qualification
+        const char code3[] = "namespace N { typedef int T; typedef long U; }\n"
+                             "namespace N { int z; }\n"
+                             "U u;\n";
+        ASSERT_EQUALS("namespace N { } namespace N { int z ; } U u ;",
+                      simplifyTypedef(code3));
     }
 
     void simplifyTypedefOriginalName1() {

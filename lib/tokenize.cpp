@@ -1810,6 +1810,8 @@ void Tokenizer::simplifyTypedefCpp()
                 if (!classPath.empty())
                     classPath += " :: ";
                 classPath += spaceInfo[i].className;
+                // the end of a namespace that is opened again is set below, start at the first body
+                spaceInfo[i].bodyEnd2 = spaceInfo[i].bodyEnd;
             }
             // a typedef that is added after the names are collected is looked for in all blocks
             const std::uint64_t nameBit = typedefNames.count(typeName->str()) != 0 ? blockNameBit(typeName->str()) : ~std::uint64_t{0};
