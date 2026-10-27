@@ -2574,8 +2574,12 @@ namespace {
         ScopeInfo3() : parent(nullptr), type(Global), bodyStart(nullptr), bodyEnd(nullptr) {}
         ScopeInfo3(ScopeInfo3 *parent_, Type type_, std::string name_, const Token *bodyStart_, const Token *bodyEnd_)
             : parent(parent_), type(type_), name(std::move(name_)), bodyStart(bodyStart_), bodyEnd(bodyEnd_) {
-            if (name.empty())
+            // a block in a function is in the scope of the function
+            if (name.empty()) {
+                if (parent)
+                    fullName = parent->fullName;
                 return;
+            }
             fullName = name;
             ScopeInfo3 *scope = parent;
             while (scope && scope->parent) {

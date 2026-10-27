@@ -103,6 +103,7 @@ private:
         TEST_CASE(simplifyUsing13873); // function declaration
         TEST_CASE(simplifyUsing14877);
         TEST_CASE(simplifyUsingBlocks); // blocks that are skipped when looking for a type alias
+        TEST_CASE(simplifyUsingInnerBlocks); // a type alias in a namespace or class is used in an inner block of a function
         TEST_CASE(simplifyUsingMemberFunctionScope);
 
         TEST_CASE(scopeInfo1);
@@ -1777,6 +1778,43 @@ private:
                              "void g() { { C::f() : m(1) } X x{1}; }\n";
         ASSERT_EQUALS("struct B { } ; struct C : B { void f ( ) ; } ; void g ( ) { { C :: f ( ) : m ( 1 ) } int x { 1 } ; }",
                       tok(code7));
+    }
+
+    void simplifyUsingInnerBlocks() {
+        // a type alias in a namespace
+        const char code1[] = "namespace M { using Q = int; void h() { Q c; { Q d; } } }\n";
+        ASSERT_EQUALS("namespace M { void h ( ) { int c ; { int d ; } } }", tok(code1));
+
+        const char code2[] = "namespace M { using Q = int; void h() { if (1) { Q d; } else { while (true) { Q e; } } } }\n";
+        ASSERT_EQUALS("namespace M { void h ( ) { if ( 1 ) { int d ; } else { while ( true ) { int e ; } } } }", tok(code2));
+
+        // a type alias in a class, inline member function
+        const char code3[] = "struct C { using Q = int; void g() { Q c; { Q d; } } };\n";
+        ASSERT_EQUALS("struct C { void g ( ) { int c ; { int d ; } } } ;", tok(code3));
+
+        // a type alias in a class, out-of-line member function
+        const char code4[] = "struct C { using Q = int; void g(); };\n"
+                             "void C::g() { if (1) Q d; }\n";
+        ASSERT_EQUALS("struct C { void g ( ) ; } ; void C :: g ( ) { if ( 1 ) { int d ; } }", tok(code4));
+
+        // a type alias in the namespace of a class, out-of-line member function
+        const char code5[] = "namespace M { struct C { void g(); }; using Q = int; }\n"
+                             "void M::C::g() { { Q d; } }\n";
+        ASSERT_EQUALS("namespace M { struct C { void g ( ) ; } ; } void M :: C :: g ( ) { int d ; }", tok(code5));
+
+        // a type alias in a function, it is not used outside of the function
+        const char code6[] = "namespace M { void h() { using Q = int; Q c; { Q d; { Q e; } } } }\n"
+                             "namespace M { void k() { Q f; } }\n";
+        ASSERT_EQUALS("namespace M { void h ( ) { int c ; { int d ; { int e ; } } } } namespace M { void k ( ) { Q f ; } }", tok(code6));
+
+        // a type alias in another namespace is not used
+        const char code7[] = "namespace M { using Q = int; }\n"
+                             "namespace N { void h() { { Q d; } } }\n";
+        ASSERT_EQUALS("namespace N { void h ( ) { Q d ; } }", tok(code7));
+
+        // a type alias at global scope
+        const char code8[] = "using Q = int; namespace M { void h() { Q c; { Q d; } } }\n";
+        ASSERT_EQUALS("namespace M { void h ( ) { int c ; { int d ; } } }", tok(code8));
     }
 
     void simplifyUsingMemberFunctionScope() {
