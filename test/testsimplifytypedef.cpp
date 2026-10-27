@@ -4658,6 +4658,13 @@ private:
                              "T t;\n";
         ASSERT_EQUALS("struct C { static int f ( ) ; void g ( ) ; } ; void C :: g ( ) { { int a = 1 ? 2 * C :: f ( ) : x ; } int b ; } T t ;",
                       simplifyTypedef(code6));
+
+        // the brace initializer of a member is not the end of the constructor
+        const char code7[] = "struct C { typedef int T; C(); int a; int b; };\n"
+                             "C::C() : a{1}, b{2} { T x; }\n"
+                             "T t;\n";
+        ASSERT_EQUALS("struct C { C ( ) ; int a ; int b ; } ; C :: C ( ) : a { 1 } , b { 2 } { int x ; } T t ;",
+                      simplifyTypedef(code7));
     }
 
     void simplifyTypedefOriginalName1() {

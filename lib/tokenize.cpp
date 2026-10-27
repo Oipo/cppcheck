@@ -1887,10 +1887,11 @@ void Tokenizer::simplifyTypedefCpp()
                             }
                         }
 
-                        // check for end of member function
+                        // check for end of member function, the end of a brace initializer of a
+                        // member or a base class is not the end of the constructor
                         if (inMemberFunc) {
                             --memberScope;
-                            if (memberScope <= 0)
+                            if (memberScope <= 0 && !initializerStart(tok2->link()))
                                 inMemberFunc = false;
                         }
                         inEnum = false;
