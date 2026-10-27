@@ -3459,7 +3459,7 @@ bool TemplateSimplifier::simplifyTemplateInstantiations(
         }
 
         if (Token::Match(startToken->previous(), ";|{|}|=|const")) {
-            const char* patternAfter = isfunc ? "(" : isVar ? ";|%op%|(" : "*|&|::| %name%";
+            const char* patternAfter = isfunc ? "(" : isVar ? ";|%op%|(|.|[|)|,|]|}|?|:" : "*|&|::| %name%";
             if (!isfunc && !isVar)
                 if (const Token* end = startToken->next()->findClosingBracket())
                     if (Token::Match(end, "> (|{"))
@@ -3536,7 +3536,7 @@ bool TemplateSimplifier::simplifyTemplateInstantiations(
 
         // TODO: re-enable when specialized check is removed
         // if (Token::Match(startToken->previous(), ";|{|}|=|const") &&
-        //     (!specialized && !instantiateMatch(tok2, typeParametersInDeclaration.size(), isfunc ? "(" : isVar ? ";|%op%|(" : "*|&|::| %name%")))
+        //     (!specialized && !instantiateMatch(tok2, typeParametersInDeclaration.size(), isfunc ? "(" : isVar ? ";|%op%|(|.|[|)|,|]|}|?|:" : "*|&|::| %name%")))
         //     return false;
 
         // already simplified

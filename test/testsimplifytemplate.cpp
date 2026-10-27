@@ -298,6 +298,7 @@ private:
         TEST_CASE(template_variable_2);
         TEST_CASE(template_variable_3);
         TEST_CASE(template_variable_4);
+        TEST_CASE(template_variable_5);
 
         TEST_CASE(simplifyDecltype);
 
@@ -6603,6 +6604,45 @@ private:
                                 "void bar ( ) { foo<int> ( ) ; } "
                                 "void test<int> ( ) { }";
         ASSERT_EQUALS(expected, tok(code));
+    }
+
+    void template_variable_5() { // variable template followed by a member access, subscript or comma
+        {
+            const char code[] = "template<class T> struct B { T b; };\n"
+                                "namespace N { template<class T> T v = T(); }\n"
+                                "void f() { int x = N::v<B<char>>.b; }\n";
+            const char expected[] = "struct B<char> ; "
+                                    "namespace N { B<char> v<B<char>> ; v<B<char>> = B<char> ( ) ; } "
+                                    "void f ( ) { int x ; x = N :: v<B<char>> . b ; } "
+                                    "struct B<char> { char b ; } ;";
+            ASSERT_EQUALS(expected, tok(code));
+        }
+        {
+            const char code[] = "namespace N { template<class T> T v = T(); }\n"
+                                "void f() { int x = N::v<int>.b; }\n";
+            const char expected[] = "namespace N { int v<int> ; v<int> = 0 ; } "
+                                    "void f ( ) { int x ; x = N :: v<int> . b ; }";
+            ASSERT_EQUALS(expected, tok(code));
+        }
+        {
+            const char code[] = "struct S { int a[2]; };\n"
+                                "template<class T> T v = T();\n"
+                                "void f() { int x = v<S>.a[1]; int y = v<int>, z = v<long>; }\n";
+            const char expected[] = "struct S { int a [ 2 ] ; } ; "
+                                    "S v<S> ; v<S> = S ( ) ; int v<int> ; v<int> = 0 ; long v<long> ; v<long> = 0 ; "
+                                    "void f ( ) { int x ; x = v<S> . a [ 1 ] ; int y ; y = v<int> ; int z ; z = v<long> ; }";
+            ASSERT_EQUALS(expected, tok(code));
+        }
+        {
+            const char code[] = "template<class T> struct B { T b; };\n"
+                                "template<class T> T v = T();\n"
+                                "void g() { v<B<char>>.b = 1; int c = v<int> ? 1 : 2; }\n";
+            const char expected[] = "struct B<char> ; "
+                                    "B<char> v<B<char>> ; v<B<char>> = B<char> ( ) ; int v<int> ; v<int> = 0 ; "
+                                    "void g ( ) { v<B<char>> . b = 1 ; int c ; c = v<int> ? 1 : 2 ; } "
+                                    "struct B<char> { char b ; } ;";
+            ASSERT_EQUALS(expected, tok(code));
+        }
     }
 
     void simplifyDecltype() {
