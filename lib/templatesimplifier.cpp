@@ -3620,6 +3620,8 @@ void TemplateSimplifier::moveInstantiationsInArguments(const Token *nameTok, con
 {
     Token *copyStart = nullptr;
     Token *copyTok = nullptr;
+    bool isCopied = false; // the same arguments in the same scope are already copied
+    bool isCopiedKnown = false;
     for (const Token *tok = nameTok->next(); tok != closingBracket; tok = tok->next()) {
         if (copyTok)
             copyTok = copyTok->next();
@@ -3628,6 +3630,28 @@ void TemplateSimplifier::moveInstantiationsInArguments(const Token *nameTok, con
         for (TokenAndName &instantiation : mTemplateInstantiations) {
             if (instantiation.token() != tok)
                 continue;
+            if (!isCopiedKnown) {
+                isCopiedKnown = true;
+                std::string key = instantiation.scope() + " :";
+                for (const Token *tok2 = nameTok->next(); tok2 != closingBracket; tok2 = tok2->next()) {
+                    // "unsigned char" is the token "char"
+                    if (tok2->isUnsigned())
+                        key += " unsigned";
+                    else if (tok2->isSigned())
+                        key += " signed";
+                    if (tok2->isLong())
+                        key += " long";
+                    key += " " + tok2->str();
+                }
+                isCopied = !mCopiedTemplateArgumentKeys.insert(std::move(key)).second;
+            }
+            // the instantiation is in the copy that is already made, it is deleted (it is not erased,
+            // a change of the number of instantiations is taken for a recursion)
+            if (isCopied) {
+                instantiation.token()->templateSimplifierPointers()->erase(&instantiation);
+                instantiation.token(nullptr);
+                continue;
+            }
             if (!copyTok) {
                 mTokenList.addtoken("(", tok);
                 copyStart = mTokenList.back();
@@ -4252,6 +4276,7 @@ void TemplateSimplifier::simplifyTemplates(const std::time_t maxtime)
         for (const auto &copied : mCopiedTemplateArguments)
             eraseTokens(copied.first->previous(), copied.second->next());
         mCopiedTemplateArguments.clear();
+        mCopiedTemplateArgumentKeys.clear();
 
         for (auto it = mInstantiatedTemplates.cbegin(); it != mInstantiatedTemplates.cend(); ++it) {
             auto decl = std::find_if(mTemplateDeclarations.begin(), mTemplateDeclarations.end(), [&it](const TokenAndName& decl) {

@@ -6929,6 +6929,33 @@ private:
             ASSERT_EQUALS(expected, tok(code));
         }
         {
+            // the same template arguments are used more than once
+            const char code[] = "template<class T> struct A { T a; };\n"
+                                "template<class T> struct V { T v; };\n"
+                                "V<V<A<int>>> v1; V<V<A<int>>> v2;\n";
+            const char expected[] = "struct A<int> ; "
+                                    "struct V<A<int>> ; "
+                                    "struct V<V<A<int>>> ; "
+                                    "V<V<A<int>>> v1 ; V<V<A<int>>> v2 ; "
+                                    "struct V<A<int>> { A<int> v ; } ; "
+                                    "struct V<V<A<int>>> { V<A<int>> v ; } ; "
+                                    "struct A<int> { int a ; } ;";
+            ASSERT_EQUALS(expected, tok(code));
+        }
+        {
+            // many template arguments that are used more than once, more than the maximum template recursion
+            std::string code = "template<class T> struct A { T a; };\n"
+                               "template<class T> struct V { T v; };\n";
+            for (int i = 0; i < 2 * settings1.maxTemplateRecursion; ++i) {
+                const std::string s = "S" + std::to_string(i);
+                code += "struct " + s + " {}; void f" + std::to_string(i) + "() { V<V<A<" + s + ">>> v1; V<V<A<" + s + ">>> v2; }\n";
+            }
+            SimpleTokenizer tokenizer(settings1, *this);
+            ASSERT(tokenizer.tokenize(code));
+            // all the templates are instantiated
+            ASSERT_EQUALS(std::string::npos, tokenizer.tokens()->stringifyList(nullptr, true).find(" < "));
+        }
+        {
             // the result does not depend on the order of the declarations
             const char expected[] = "struct B<char> ; "
                                     "struct S<B<char>> ; "

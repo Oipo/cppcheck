@@ -31,6 +31,7 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 class ErrorLogger;
@@ -451,6 +452,7 @@ private:
      * The template arguments of a template usage are removed when it is replaced with the new name.
      * Move the template instantiations in them to a copy of the arguments at the end of the token
      * list, so the templates are still instantiated. The copies are removed at the end of the pass.
+     * The same arguments in the same scope are copied once, the instantiations in them are removed.
      * @param nameTok the name of the template usage
      * @param closingBracket the closing bracket of the template arguments
      */
@@ -530,6 +532,8 @@ private:
     std::vector<TokenAndName> mExplicitInstantiationsToDelete;
     /** copies of the template arguments of replaced template usages, the instantiations in them are not lost */
     std::vector<std::pair<Token *, Token *>> mCopiedTemplateArguments;
+    /** the scopes and the template arguments that are copied, the same arguments are copied once */
+    std::unordered_set<std::string> mCopiedTemplateArgumentKeys;
     std::vector<TokenAndName> mTypesUsedInTemplateInstantiation;
     std::unordered_map<const Token*, int> mTemplateNamePos;
     std::string mDump;
