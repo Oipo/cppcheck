@@ -319,6 +319,7 @@ private:
         TEST_CASE(requires7);
         TEST_CASE(requiresClass);
         TEST_CASE(instantiationAfterOperator);
+        TEST_CASE(instantiationInTemplateArguments);
 
         TEST_CASE(explicitBool1);
         TEST_CASE(explicitBool2);
@@ -1019,10 +1020,11 @@ private:
                                 "template<class T> struct C { };\n"
                                 "C< B<A> > c;\n";
             ASSERT_EQUALS("struct A { } ; "
-                          "template < class T > struct B { } ; "  // <- redundant.. but nevermind
+                          "struct B<A> ; "
                           "struct C<B<A>> ; "
                           "C<B<A>> c ; "
-                          "struct C<B<A>> { } ;",
+                          "struct C<B<A>> { } ; "
+                          "struct B<A> { } ;",
                           tok(code));
         }
     }
@@ -1523,15 +1525,9 @@ private:
                            "void h<int> ( ) ; "
                            "void j ( ) { h<int> ( ) ; } "
                            "void h<int> ( ) { f<S<int>::type(0)> ( ) ; } "
-                           "struct S<int> { } ; "
-                           "void f<S<int>::type(0)> ( ) { }";
-        const char act[] = "template < typename T > struct S { } ; "
-                           "void f<S<int>::type(0)> ( ) ; "
-                           "void h<int> ( ) ; "
-                           "void j ( ) { h<int> ( ) ; } "
-                           "void h<int> ( ) { f<S<int>::type(0)> ( ) ; } "
-                           "void f<S<int>::type(0)> ( ) { }";
-        TODO_ASSERT_EQUALS(exp, act, tok(code));
+                           "void f<S<int>::type(0)> ( ) { } "
+                           "struct S<int> { } ;";
+        ASSERT_EQUALS(exp, tok(code));
     }
 
     void template61() { // hang in daca, code extracted from kodi
@@ -4748,7 +4744,7 @@ private:
                             "template <typename T> struct S {a};\n"
                             "template <typename T> struct S<C<T>> {b};\n"
                             "S<C<int>> s;\n";
-        const char exp[]  = "template < typename T > struct C { } ; template < typename T > struct S { a } ; struct S<C<int>> ; S<C<int>> s ; struct S<C<int>> { b } ;";
+        const char exp[]  = "struct C<int> ; template < typename T > struct S { a } ; struct S<C<int>> ; S<C<int>> s ; struct S<C<int>> { b } ; struct C<int> { } ;";
         ASSERT_EQUALS(exp, tok(code));
     }
 
@@ -5549,12 +5545,16 @@ private:
 
         // Previously resulted in:
         //   test.cpp:2:33: error: Syntax Error: AST broken, binary operator '>' doesn't have two operands. [internalAstError]
-        ASSERT_EQUALS("struct A<B<int>[]> ; "
+        ASSERT_EQUALS("struct A<int[]> ; "
+                      "struct A<B<int>[]> ; "
+                      "struct B<int> ; "
                       "struct B<B<int>> ; "
                       "struct C<B<int>> ; "
                       "C<B<int>> y ; "
                       "struct C<B<int>> : B<B<int>> { } ; "
+                      "struct B<int> { A<int[]> x ; } ; "
                       "struct B<B<int>> { A<B<int>[]> x ; } ; "
+                      "struct A<int[]> { } ; "
                       "struct A<B<int>[]> { } ;",
                       tok("template <class  > struct A {};\n"
                           "template <class T> struct B { A<T[]> x; };\n"
@@ -6696,12 +6696,13 @@ private:
                             "template <typename TC> class Derived : private Base<TC> {};\n"
                             "typedef Derived<C<static_cast<int>(-1)> > C_;\n"
                             "class C3 { C_ c; };\n";
-        const char expected[] = "template < int N > class C { } ; "
+        const char expected[] = "class C<static_cast<int>(-1)> ; "
                                 "class Base<C<static_cast<int>(-1)>> ; "
                                 "class Derived<C<static_cast<int>(-1)>> ; "
                                 "class C3 { Derived<C<static_cast<int>(-1)>> c ; } ; "
                                 "class Derived<C<static_cast<int>(-1)>> : private Base<C<static_cast<int>(-1)>> { } ; "
-                                "class Base<C<static_cast<int>(-1)>> { } ;";
+                                "class Base<C<static_cast<int>(-1)>> { } ; "
+                                "class C<static_cast<int>(-1)> { } ;";
         ASSERT_EQUALS(expected, tok(code));
     }
 
@@ -6873,6 +6874,90 @@ private:
             const char expected[] = "struct S<int> ; "
                                     "int g ( int a ) { return a * S<int> { 1 } . s ; } "
                                     "struct S<int> { int s ; } ;";
+            ASSERT_EQUALS(expected, tok(code));
+        }
+    }
+
+    void instantiationInTemplateArguments() {
+        {
+            // a template argument that is only used in an explicit specialization
+            const char code[] = "template<class T> struct B { T b; };\n"
+                                "template<class T> struct S;\n"
+                                "template<> struct S<B<char>> { int x; };\n"
+                                "S<B<char>> s;\n";
+            const char expected[] = "struct B<char> ; "
+                                    "struct S<B<char>> ; "
+                                    "template < class T > struct S ; "
+                                    "struct S<B<char>> { int x ; } ; "
+                                    "S<B<char>> s ; "
+                                    "struct B<char> { char b ; } ;";
+            ASSERT_EQUALS(expected, tok(code));
+        }
+        {
+            const char code[] = "template<class T> struct B { T b; };\n"
+                                "template<class T, class U> struct S;\n"
+                                "template<> struct S<B<char>, B<short>> { int x; };\n";
+            const char expected[] = "struct B<short> ; struct B<char> ; "
+                                    "struct S<B<char>,B<short>> ; "
+                                    "template < class T , class U > struct S ; "
+                                    "struct S<B<char>,B<short>> { int x ; } ; "
+                                    "struct B<short> { short b ; } ; struct B<char> { char b ; } ;";
+            ASSERT_EQUALS(expected, tok(code));
+        }
+        {
+            const char code[] = "namespace N { template<class T> struct B { T b; }; }\n"
+                                "template<class T> struct S;\n"
+                                "template<> struct S<N::B<char>> { int x; };\n"
+                                "S<N::B<char>> s;\n";
+            const char expected[] = "namespace N { struct B<char> ; } "
+                                    "struct S<N::B<char>> ; "
+                                    "template < class T > struct S ; "
+                                    "struct S<N::B<char>> { int x ; } ; "
+                                    "S<N::B<char>> s ; "
+                                    "struct N :: B<char> { char b ; } ;";
+            ASSERT_EQUALS(expected, tok(code));
+        }
+        {
+            const char code[] = "template<class T> struct B { T b; };\n"
+                                "template<class T> int f(T);\n"
+                                "template<> int f<B<char>>(B<char> x) { return x.b; }\n";
+            const char expected[] = "struct B<char> ; "
+                                    "int f<B<char>> ( B<char> x ) ; "
+                                    "template < class T > int f ( T ) ; "
+                                    "int f<B<char>> ( B<char> x ) { return x . b ; } "
+                                    "struct B<char> { char b ; } ;";
+            ASSERT_EQUALS(expected, tok(code));
+        }
+        {
+            // the result does not depend on the order of the declarations
+            const char expected[] = "struct B<char> ; "
+                                    "struct S<B<char>> ; "
+                                    "S<B<char>> s ; "
+                                    "struct S<B<char>> { int x ; } ; "
+                                    "struct B<char> { char b ; } ;";
+            const char code1[] = "template<class T> struct B { T b; };\n"
+                                 "template<class T> struct S { int x; };\n"
+                                 "S<B<char>> s;\n";
+            ASSERT_EQUALS(expected, tok(code1));
+            const char code2[] = "template<class T> struct S { int x; };\n"
+                                 "template<class T> struct B { T b; };\n"
+                                 "S<B<char>> s;\n";
+            const char expected2[] = "struct S<B<char>> ; "
+                                     "struct B<char> ; "
+                                     "S<B<char>> s ; "
+                                     "struct B<char> { char b ; } ; "
+                                     "struct S<B<char>> { int x ; } ;";
+            ASSERT_EQUALS(expected2, tok(code2));
+        }
+        {
+            const char code[] = "template<class T> struct B { T b; };\n"
+                                "template<class T> struct S { int x; };\n"
+                                "S<B<B<char>>> s;\n";
+            const char expected[] = "struct B<char> ; struct B<B<char>> ; "
+                                    "struct S<B<B<char>>> ; "
+                                    "S<B<B<char>>> s ; "
+                                    "struct S<B<B<char>>> { int x ; } ; "
+                                    "struct B<char> { char b ; } ; struct B<B<char>> { B<char> b ; } ;";
             ASSERT_EQUALS(expected, tok(code));
         }
     }

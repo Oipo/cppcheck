@@ -447,6 +447,15 @@ private:
                               const std::list<std::string> &typeStringsUsedInTemplateInstantiation,
                               const std::string &newName);
 
+    /**
+     * The template arguments of a template usage are removed when it is replaced with the new name.
+     * Move the template instantiations in them to a copy of the arguments at the end of the token
+     * list, so the templates are still instantiated. The copies are removed at the end of the pass.
+     * @param nameTok the name of the template usage
+     * @param closingBracket the closing bracket of the template arguments
+     */
+    void moveInstantiationsInArguments(const Token *nameTok, const Token *closingBracket);
+
 protected:
     /**
      * @brief TemplateParametersInDeclaration
@@ -519,6 +528,8 @@ private:
     std::list<TokenAndName> mInstantiatedTemplates;
     std::list<TokenAndName> mMemberFunctionsToDelete;
     std::vector<TokenAndName> mExplicitInstantiationsToDelete;
+    /** copies of the template arguments of replaced template usages, the instantiations in them are not lost */
+    std::vector<std::pair<Token *, Token *>> mCopiedTemplateArguments;
     std::vector<TokenAndName> mTypesUsedInTemplateInstantiation;
     std::unordered_map<const Token*, int> mTemplateNamePos;
     std::string mDump;

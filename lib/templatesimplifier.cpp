@@ -861,14 +861,13 @@ void TemplateSimplifier::getTemplateInstantiations()
                 tok = tok->tokAt(2);
             }
 
-            // skip specialization
-            if (tok == skip) {
+            // the name of a specialization is not an instantiation, but its template arguments can be
+            const bool isSpecialization = tok == skip;
+            if (isSpecialization)
                 skip = nullptr;
-                continue;
-            }
 
             // look for function instantiation with type deduction
-            if (tok->strAt(1) == "(") {
+            if (!isSpecialization && tok->strAt(1) == "(") {
                 std::vector<const Token *> instantiationArgs;
                 getFunctionArguments(tok, instantiationArgs);
 
@@ -978,11 +977,6 @@ void TemplateSimplifier::getTemplateInstantiations()
                 Token::Match(tok, "const_cast|dynamic_cast|reinterpret_cast|static_cast"))
                 continue;
 
-            if (tok == skip) {
-                skip = nullptr;
-                continue;
-            }
-
             // Add inner template instantiations first => go to the ">"
             // and then parse backwards, adding all seen instantiations
             Token *tok2 = tok->next()->findClosingBracket();
@@ -996,6 +990,9 @@ void TemplateSimplifier::getTemplateInstantiations()
                 } else if (Token::Match(tok2->next(), "class|struct"))
                     tok2->deleteNext();
             }
+
+            if (isSpecialization)
+                continue;
 
             // Add outer template..
             if (templateParameters(tok->next()) || tok->strAt(2) == ">") {
@@ -2161,6 +2158,7 @@ void TemplateSimplifier::expandTemplate(
                         mTokenList.addtoken(newName, tok5->linenr(), tok5->column(), tok5->fileIndex());
                         tok5 = tok5->next()->findClosingBracket();
                     } else {
+                        moveInstantiationsInArguments(tok5, tok5->next()->findClosingBracket());
                         tok5->str(newName);
                         eraseTokens(tok5, tok5->next()->findClosingBracket()->next());
                     }
@@ -2394,6 +2392,7 @@ void TemplateSimplifier::expandTemplate(
                                 mTokenList.addtoken(newName, tok3);
                                 tok3 = closingBracket;
                             } else {
+                                moveInstantiationsInArguments(tok3, closingBracket);
                                 tok3->str(newName);
                                 eraseTokens(tok3, closingBracket->next());
                             }
@@ -3617,6 +3616,38 @@ static bool matchTemplateParameters(const Token *nameTok, const std::list<std::s
     return it == strings.cend() && tok && tok->str() == ">";
 }
 
+void TemplateSimplifier::moveInstantiationsInArguments(const Token *nameTok, const Token *closingBracket)
+{
+    Token *copyStart = nullptr;
+    Token *copyTok = nullptr;
+    for (const Token *tok = nameTok->next(); tok != closingBracket; tok = tok->next()) {
+        if (copyTok)
+            copyTok = copyTok->next();
+        if (!tok->isName() || !tok->templateSimplifierPointers() || tok->templateSimplifierPointers()->empty())
+            continue;
+        for (TokenAndName &instantiation : mTemplateInstantiations) {
+            if (instantiation.token() != tok)
+                continue;
+            if (!copyTok) {
+                mTokenList.addtoken("(", tok);
+                copyStart = mTokenList.back();
+                TokenList::copyTokens(copyStart, nameTok->tokAt(2), closingBracket->previous());
+                mTokenList.addtoken(")", tok);
+                Token::createMutualLinks(copyStart, mTokenList.back());
+                summarizeBlocks(copyStart, copyStart->link());
+                copyTok = copyStart;
+                for (const Token *tok2 = nameTok->next(); tok2 != tok; tok2 = tok2->next())
+                    copyTok = copyTok->next();
+            }
+            instantiation.token()->templateSimplifierPointers()->erase(&instantiation);
+            instantiation.token(copyTok);
+            copyTok->templateSimplifierPointer(&instantiation);
+        }
+    }
+    if (copyStart)
+        mCopiedTemplateArguments.emplace_back(copyStart, copyStart->link());
+}
+
 void TemplateSimplifier::replaceTemplateUsage(
     const TokenAndName &instantiation,
     const std::list<std::string> &typeStringsUsedInTemplateInstantiation,
@@ -3669,7 +3700,6 @@ void TemplateSimplifier::replaceTemplateUsage(
         if (!tok2)
             break;
 
-        const Token * const nameTok1 = nameTok;
         nameTok->str(newName);
         // the '<' is removed below but what follows it could be '<'
         for (Token *block : blocks)
@@ -3677,17 +3707,7 @@ void TemplateSimplifier::replaceTemplateUsage(
 
         // matching template usage => replace tokens..
         // Foo < int >  =>  Foo<int>
-        for (const Token *tok = nameTok1->next(); tok != tok2; tok = tok->next()) {
-            if (tok->isName() && tok->templateSimplifierPointers() && !tok->templateSimplifierPointers()->empty()) {
-                for (auto ti = mTemplateInstantiations.cbegin(); ti != mTemplateInstantiations.cend();) {
-                    if (ti->token() == tok) {
-                        mTemplateInstantiations.erase(ti);
-                        break;
-                    }
-                    ++ti;
-                }
-            }
-        }
+        moveInstantiationsInArguments(nameTok, tok2);
         // Fix crash in #9007
         if (Token::simpleMatch(nameTok->previous(), ">"))
             mTemplateNamePos.erase(nameTok->previous());
@@ -4227,6 +4247,11 @@ void TemplateSimplifier::simplifyTemplates(const std::time_t maxtime)
                 mTemplateNamePos.clear(); // positions might be invalid after instantiations
             }
         }
+
+        // remove the copies of the template arguments
+        for (const auto &copied : mCopiedTemplateArguments)
+            eraseTokens(copied.first->previous(), copied.second->next());
+        mCopiedTemplateArguments.clear();
 
         for (auto it = mInstantiatedTemplates.cbegin(); it != mInstantiatedTemplates.cend(); ++it) {
             auto decl = std::find_if(mTemplateDeclarations.begin(), mTemplateDeclarations.end(), [&it](const TokenAndName& decl) {
