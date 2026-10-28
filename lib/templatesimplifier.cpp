@@ -650,6 +650,68 @@ bool TemplateSimplifier::removeTemplate(Token *tok, std::map<const Token*, Token
     return false;
 }
 
+// Is the name at nameTok qualified by a template, "A < T > :: f" (a member of a class template that is
+// implemented outside of the class definition)
+static bool isQualifiedByTemplate(const Token *nameTok)
+{
+    if (nameTok->strAt(-1) == "~")
+        nameTok = nameTok->previous();
+    for (const Token *qualifier = nameTok; Token::Match(qualifier->tokAt(-2), "%name%|> ::"); qualifier = qualifier->tokAt(-2)) {
+        if (qualifier->strAt(-2) == ">")
+            return true;
+    }
+    return false;
+}
+
+// The names that qualify tok, "N :: A" for "N :: A :: tok"
+static std::string getQualification(const Token *tok)
+{
+    std::string qualification;
+    for (const Token *q = tok; Token::Match(q->tokAt(-2), "%name% ::"); q = q->tokAt(-2))
+        qualification = q->strAt(-2) + (qualification.empty() ? "" : " :: ") + qualification;
+    return qualification;
+}
+
+// Can a name with the qualification be in the scope, "N :: A" or "A" in the scope "N :: A"
+static bool isQualificationOfScope(const std::string &qualification, const std::string &scope)
+{
+    if (qualification.empty() || qualification == scope)
+        return true;
+    return scope.size() > qualification.size() + 4 &&
+           scope.compare(scope.size() - qualification.size() - 4, std::string::npos, " :: " + qualification) == 0;
+}
+
+// Is the qualification, "A<int>", another instantiation of a class template than the one in the scope,
+// "A<long> :: B". The scope of an instantiation can be another one than the scope of its template (an
+// instantiation in a nested namespace), and a member can be inherited from another class ("C<int> :: f"
+// for a member of the base class of C<int>), so other qualifications are not compared.
+static bool isOtherInstantiationInScope(const std::string &qualification, const std::string &scope)
+{
+    const std::string::size_type pos = qualification.find('<');
+    if (pos == std::string::npos || isQualificationOfScope(qualification, scope))
+        return false;
+    // "A <", the names of instantiations have the same form as the scopes
+    const std::string start = qualification.substr(0, pos + 1);
+    return scope.compare(0, start.size(), start) == 0 || scope.find(" :: " + start) != std::string::npos;
+}
+
+// Is a member function after the template arguments of a class that end at closing:
+// "A < T > :: f (", "A < T > :: B :: f (" or "A < T > :: B < U > :: f (" for a member of a member class
+static bool isMemberFunctionOfClass(const Token *closing)
+{
+    const Token *tok = closing ? closing->next() : nullptr;
+    while (Token::Match(tok, ":: %name% ::|<")) {
+        if (tok->strAt(2) == "<") {
+            tok = tok->tokAt(2)->findClosingBracket();
+            if (!Token::simpleMatch(tok, "> ::"))
+                return false;
+            tok = tok->next();
+        } else
+            tok = tok->tokAt(2);
+    }
+    return Token::Match(tok, ":: ~| %name% (");
+}
+
 bool TemplateSimplifier::getTemplateDeclarations()
 {
     bool codeWithTemplates = false;
@@ -692,6 +754,13 @@ bool TemplateSimplifier::getTemplateDeclarations()
                     break;
                 if (!tok->scopeInfo())
                     syntaxError(tok);
+                // A member template of a class template that is defined for one specialization of the class,
+                // "template < > template < class U > void A < int > :: f ( U )". When the class has been
+                // instantiated, "A<int>" is a class and f is a member template of it.
+                if (Token::simpleMatch(tok, "template < > template <") && !isQualifiedByTemplate(parmEnd->tokAt(namepos))) {
+                    tok->deleteNext(2);
+                    tok->deleteThis();
+                }
                 TokenAndName decl(tok, tok->scopeInfo()->name, parmEnd->tokAt(namepos), parmEnd);
                 if (decl.isForwardDeclaration()) {
                     // Declaration => add to mTemplateForwardDeclarations
@@ -1807,9 +1876,8 @@ static T *nextTemplateHead(T *head)
 // The "template" with the template parameters of the class in a member function of a class template
 // that is implemented outside of the class definition, nameTok is the name of the class. A member
 // template has a template head of its own after the one of the class:
-// "template < class T > template < class U > void A < T > :: f ( U )". When the class is a member of a
-// class template, its template head is the last one. A template template parameter has a "template" in
-// a template head, it is not a template head.
+// "template < class T > template < class U > void A < T > :: f ( U )". A template template parameter
+// has a "template" in a template head, it is not a template head.
 static Token *findClassTemplateHead(Token *nameTok)
 {
     Token *first = nullptr;
@@ -1817,19 +1885,7 @@ static Token *findClassTemplateHead(Token *nameTok)
         if (prev->str() == "template")
             first = prev;
     }
-    bool memberOfTemplate = false;
-    for (const Token *qualifier = nameTok; Token::Match(qualifier->tokAt(-2), "%name%|> ::"); qualifier = qualifier->tokAt(-2)) {
-        if (qualifier->strAt(-2) == ">") {
-            memberOfTemplate = true;
-            break;
-        }
-    }
-    if (!memberOfTemplate)
-        return first;
-    Token *head = first;
-    while (Token *next = nextTemplateHead(head))
-        head = next;
-    return head;
+    return first;
 }
 
 void TemplateSimplifier::expandTemplate(
@@ -2176,10 +2232,16 @@ void TemplateSimplifier::expandTemplate(
                 tok3 = tok3->next();
         }
 
-        // member function implemented outside class definition
+        // member function implemented outside class definition. A member of a class that is qualified by a
+        // template, "A < T > :: B < U > :: f", is copied when A is instantiated: it is not a member of the
+        // class B of an instantiation of A. The qualification tells which class it is in,
+        // "A<int> :: B < U > :: f" is not a member of B in A<long>.
         else if (Token::Match(tok3, "%name% <") &&
                  templateInstantiation.name() == tok3->str() &&
-                 instantiateMatch(tok3, typeParametersInDeclaration.size(), templateDeclaration.isVariadic(), ":: ~| %name% (")) {
+                 instantiateMatch(tok3, typeParametersInDeclaration.size(), templateDeclaration.isVariadic(), nullptr) &&
+                 isMemberFunctionOfClass(tok3->next()->findClosingBracket()) &&
+                 !isQualifiedByTemplate(tok3) &&
+                 isQualificationOfScope(getQualification(tok3), templateDeclaration.scope())) {
             // there must be template..
             Token * tok5 = findClassTemplateHead(tok3); // start of function return type
             if (!tok5 || !hasTemplateParameters(tok5))
@@ -3376,6 +3438,16 @@ bool TemplateSimplifier::simplifyTemplateInstantiations(
     // allow continuous instantiations until all templates has been expanded
     //bool done = false;
 
+    // A member of a class template that is implemented outside of the class definition,
+    // "template < class T > void A < T > :: f ( )", is copied when the class is instantiated. It is
+    // not instantiated on its own, the template parameters are the ones of the class. A member
+    // template, "template < class T > template < class U > void A < T > :: f ( U )", is instantiated
+    // in the next pass, from the copy. An explicit specialization, "template < > void A < int > :: f ( )"
+    // or "template < > template < class U > void A < int > :: f ( U )", is used when "A < int >" is the
+    // name of a class, "A<int>".
+    if (isQualifiedByTemplate(templateDeclaration.nameToken()))
+        return false;
+
     // Contains tokens such as "T"
     std::vector<const Token *> typeParametersInDeclaration;
     getTemplateParametersInDeclaration(templateDeclaration.token()->tokAt(2), typeParametersInDeclaration);
@@ -3770,6 +3842,11 @@ void TemplateSimplifier::replaceTemplateUsage(
         }
 
         if (!matchTemplateParameters(nameTok, typeStringsUsedInTemplateInstantiation))
+            continue;
+
+        // a member of another instantiation of the class template, "A<int> :: B < char >" is not
+        // "A<long> :: B < char >"
+        if (Token::Match(nameTok->tokAt(-2), "%name% ::") && isOtherInstantiationInScope(nameTok->strAt(-2), instantiation.scope()))
             continue;
 
         Token *tok2 = nameTok->next()->findClosingBracket();

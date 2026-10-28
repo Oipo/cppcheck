@@ -332,8 +332,12 @@ private:
         TEST_CASE(templateMemberTemplateOutOfLine);
         TEST_CASE(templateTemplateParameterOutOfLine);
         TEST_CASE(templateMemberOfMemberTemplateOutOfLine);
+        TEST_CASE(templateMemberClassInTwoInstantiations);
+        TEST_CASE(templateInheritedMemberTemplate);
         TEST_CASE(templateExplicitInstantiationOfMember);
         TEST_CASE(templateSpecializationOfMemberTemplate);
+        TEST_CASE(templateSpecializationOfMember);
+        TEST_CASE(templateMemberTemplateCall);
         TEST_CASE(templateMemberWithoutTemplateHead);
         TEST_CASE(templateQualifiedMemberTemplate);
         TEST_CASE(templateMemberInOtherBlock);
@@ -1920,14 +1924,13 @@ private:
                             "int main() {\n"
                             "    SortWith<int>(0);\n"
                             "}\n";
-        const char exp[] = "template < typename Type > "
-                           "struct SortWith { "
-                           "SortWith ( Type ) ; "
-                           "} ; "
-                           "SortWith<int> :: SortWith<int> ( int ) ; "
+        const char exp[] = "struct SortWith<int> ; "
                            "int main ( ) { "
                            "SortWith<int> ( 0 ) ; "
                            "} "
+                           "struct SortWith<int> { "
+                           "SortWith<int> ( int ) ; "
+                           "} ; "
                            "SortWith<int> :: SortWith<int> ( int ) { }";
         ASSERT_EQUALS(exp, tok(code));
     }
@@ -1981,14 +1984,13 @@ private:
                             "MultiReads::MultiReads() {\n"
                             "    mc = new MultiConsumer<reads_packet>();\n"
                             "}\n";
-        const char exp[] = "template < typename Task > " // TODO: this should be expanded
-                           "class MultiConsumer { "
-                           "MultiConsumer ( ) ; "
-                           "} ; "
-                           "MultiConsumer<reads_packet> :: MultiConsumer<reads_packet> ( ) ; "
+        const char exp[] = "class MultiConsumer<reads_packet> ; "
                            "MultiReads :: MultiReads ( ) { "
                            "mc = new MultiConsumer<reads_packet> ( ) ; "
                            "} "
+                           "class MultiConsumer<reads_packet> { "
+                           "MultiConsumer<reads_packet> ( ) ; "
+                           "} ; "
                            "MultiConsumer<reads_packet> :: MultiConsumer<reads_packet> ( ) : sizeBuffer ( 0 ) { }";
         ASSERT_EQUALS(exp, tok(code));
     }
@@ -4942,18 +4944,17 @@ private:
                                 "void f() { A<X> x; }\n";
             TODO_ASSERT_EQUALS(
                 "Fix template arg",
-                "template < typename T , int N > struct I ; "
                 "struct A<X,(sizeof(X)>8)> ; "
-                "template < typename T , int N > struct I { "
-                "I ( A < T , N > * a ) ; "
-                "A < T , N > * p ; "
-                "} ; "
-                "I<X,(sizeof(X)>8)> :: I<X,(sizeof(X)>8)> ( A < X , ( sizeof ( X ) > 8 ) > * a ) ; "
+                "struct I<X,(sizeof(X)>8)> ; "
                 "void f ( ) { "
                 "A<X,(sizeof(X)>8)> x ; "
                 "} "
                 "struct A<X,(sizeof(X)>8)> { "
                 "I<X,(sizeof(X)>8)> begin ( ) { return I<X,(sizeof(X)>8)> ( this ) ; } "
+                "} ; "
+                "struct I<X,(sizeof(X)>8)> { "
+                "I<X,(sizeof(X)>8)> ( A < X , ( sizeof ( X ) > 8 ) > * a ) ; "
+                "A < X , ( sizeof ( X ) > 8 ) > * p ; "
                 "} ; "
                 "I<X,(sizeof(X)>8)> :: I<X,(sizeof(X)>8)> ( A < X , ( sizeof ( X ) > 8 ) > * a ) : p ( a ) { }",
                 tok(code));
@@ -7214,16 +7215,152 @@ private:
                                "Outer<int> :: Inner<char> x ; "
                                "struct Outer<int> { struct Inner<char> ; "
                                "} ; "
-                               "void Outer<int> :: Inner<char> :: f ( ) { } "
                                "struct Outer<int> :: Inner<char> { void f ( ) ; "
-                               "} ;";
-            const char act[] = "struct Outer<int> ; "
-                               "template < class T > template < class U > void Outer < T > :: Inner < U > :: f ( ) { } Outer<int> :: Inner<char> x ; "
-                               "struct Outer<int> { struct Inner<char> ; "
                                "} ; "
-                               "void Outer < T > :: Inner<char> :: f ( ) { } "
-                               "struct Outer<int> :: Inner<char> { void f ( ) ; "
-                               "} ;";
+                               "void Outer<int> :: Inner<char> :: f ( ) { }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+        {
+            // the member function is in the class of its instantiation of Outer
+            const char code[] = "template <class T> struct Outer { template <class U> struct Inner { void f(); }; };\n"
+                                "template <class T> template <class U> void Outer<T>::Inner<U>::f() { T t; U u; }\n"
+                                "Outer<int>::Inner<char> x;\n"
+                                "Outer<long>::Inner<char> y;\n";
+            const char exp[] = "struct Outer<int> ; struct Outer<long> ; "
+                               "Outer<int> :: Inner<char> x ; "
+                               "Outer<long> :: Inner<char> y ; "
+                               "struct Outer<int> { struct Inner<char> ; } ; "
+                               "struct Outer<long> { struct Inner<char> ; } ; "
+                               "struct Outer<long> :: Inner<char> { void f ( ) ; } ; "
+                               "void Outer<long> :: Inner<char> :: f ( ) { long t ; char u ; } "
+                               "struct Outer<int> :: Inner<char> { void f ( ) ; } ; "
+                               "void Outer<int> :: Inner<char> :: f ( ) { int t ; char u ; }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+        {
+            // a member class that is not a template
+            const char code[] = "template <class T> struct Outer { struct Inner { void f(); }; };\n"
+                                "template <class T> void Outer<T>::Inner::f() { T t; }\n"
+                                "Outer<int> o;\n";
+            const char exp[] = "struct Outer<int> ; "
+                               "Outer<int> o ; "
+                               "struct Outer<int> { struct Inner { void f ( ) ; } ; } ; "
+                               "void Outer<int> :: Inner :: f ( ) { int t ; }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+        {
+            // the member class template is used in the class template
+            const char code[] = "template <class T> struct Outer { template <class U> struct Inner { void f(); }; Inner<char> i; };\n"
+                                "template <class T> template <class U> void Outer<T>::Inner<U>::f() { T t; U u; }\n"
+                                "Outer<int> o;\n";
+            const char exp[] = "struct Outer<int> ; "
+                               "Outer<int> o ; "
+                               "struct Outer<int> { struct Inner<char> ; Inner<char> i ; } ; "
+                               "struct Outer<int> :: Inner<char> { void f ( ) ; } ; "
+                               "void Outer<int> :: Inner<char> :: f ( ) { int t ; char u ; }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+        {
+            // the destructor of a member class template
+            const char code[] = "template <class T> struct Outer { template <class U> struct Inner { ~Inner(); }; };\n"
+                                "template <class T> template <class U> Outer<T>::Inner<U>::~Inner() { T t; }\n"
+                                "Outer<int>::Inner<char> x;\n";
+            const char exp[] = "struct Outer<int> ; "
+                               "Outer<int> :: Inner<char> x ; "
+                               "struct Outer<int> { struct Inner<char> ; } ; "
+                               "struct Outer<int> :: Inner<char> { ~ Inner<char> ( ) ; } ; "
+                               "Outer<int> :: Inner<char> :: ~ Inner<char> ( ) { int t ; }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+        {
+            // an explicit call of the destructor of a member class template
+            const char code[] = "template <class T> struct Outer { template <class U> struct Inner { ~Inner(); }; };\n"
+                                "template <class T> template <class U> Outer<T>::Inner<U>::~Inner() { T t; }\n"
+                                "void f(Outer<int>::Inner<char> *p) { p->~Inner<char>(); }\n";
+            const char exp[] = "struct Outer<int> ; "
+                               "void f ( Outer<int> :: Inner<char> * p ) { p . ~ Inner<char> ( ) ; } "
+                               "struct Outer<int> { struct Inner<char> ; } ; "
+                               "struct Outer<int> :: Inner<char> { ~ Inner<char> ( ) ; } ; "
+                               "Outer<int> :: Inner<char> :: ~ Inner<char> ( ) { int t ; }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+        {
+            // a class template with the name of a member class template of another class template
+            const char code[] = "template <class T> struct P { template <class U> struct Inner { void f(); }; };\n"
+                                "template <class T> template <class U> void P<T>::Inner<U>::f() { T t; }\n"
+                                "template <class U> struct Inner { void f(); };\n"
+                                "Inner<char> i;\n";
+            const char exp[] = "template < class T > struct P { template < class U > struct Inner { void f ( ) ; } ; } ; "
+                               "template < class T > template < class U > void P < T > :: Inner < U > :: f ( ) { T t ; } "
+                               "struct Inner<char> ; "
+                               "Inner<char> i ; "
+                               "struct Inner<char> { void f ( ) ; } ;";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+    }
+
+    void templateMemberClassInTwoInstantiations() {
+        // the same instantiation of a member class template in two instantiations of the class template
+        {
+            const char code[] = "template <class T> struct Outer { template <class U> struct Inner { T t; U u; }; };\n"
+                                "Outer<int>::Inner<char> x;\n"
+                                "Outer<long>::Inner<char> y;\n";
+            const char exp[] = "struct Outer<int> ; struct Outer<long> ; "
+                               "Outer<int> :: Inner<char> x ; "
+                               "Outer<long> :: Inner<char> y ; "
+                               "struct Outer<int> { struct Inner<char> ; } ; "
+                               "struct Outer<long> { struct Inner<char> ; } ; "
+                               "struct Outer<long> :: Inner<char> { long t ; char u ; } ; "
+                               "struct Outer<int> :: Inner<char> { int t ; char u ; } ;";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+        {
+            // the class template is in a namespace
+            const char code[] = "namespace N { template <class T> struct Outer { template <class U> struct Inner { T t; U u; }; }; }\n"
+                                "N::Outer<int>::Inner<char> x;\n"
+                                "N::Outer<long>::Inner<char> y;\n";
+            const char exp[] = "namespace N { struct Outer<int> ; struct Outer<long> ; } "
+                               "N :: Outer<int> :: Inner<char> x ; "
+                               "N :: Outer<long> :: Inner<char> y ; "
+                               "struct N :: Outer<int> { struct Inner<char> ; } ; "
+                               "struct N :: Outer<long> { struct Inner<char> ; } ; "
+                               "struct N :: Outer<long> :: Inner<char> { long t ; char u ; } ; "
+                               "struct N :: Outer<int> :: Inner<char> { int t ; char u ; } ;";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+    }
+
+    void templateInheritedMemberTemplate() {
+        {
+            // a member template of the base class, called with the qualification of the derived class
+            const char code[] = "struct ipool { template <typename T> T* allocate() { return nullptr; } };\n"
+                                "template <int S> struct gp : ipool {};\n"
+                                "int *f() { return gp<4>::allocate<int>(); }\n"
+                                "int *g() { ipool p; return p.allocate<int>(); }\n";
+            const char exp[] = "struct ipool { int * allocate<int> ( ) ; } ; "
+                               "struct gp<4> ; "
+                               "int * f ( ) { return gp<4> :: allocate<int> ( ) ; } "
+                               "int * g ( ) { ipool p ; return p . allocate<int> ( ) ; } "
+                               "struct gp<4> : ipool { } ; "
+                               "int * ipool :: allocate<int> ( ) { return nullptr ; }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+        {
+            // the member template of the derived class hides the one of the base class
+            const char code[] = "struct ipool { template <typename T> T* allocate() { return nullptr; } };\n"
+                                "template <int S> struct gp : ipool { template <typename U> U* allocate() { return ipool::allocate<U>(); } };\n"
+                                "int *f() { return gp<4>::allocate<int>(); }\n";
+            const char exp[] = "struct ipool { int * allocate<int> ( ) ; } ; "
+                               "struct gp<4> ; "
+                               "int * f ( ) { return gp<4> :: allocate<int> ( ) ; } "
+                               "struct gp<4> : ipool { int * allocate<int> ( ) ; } ; "
+                               "int * gp<4> :: allocate<int> ( ) { return ipool :: allocate<int> ( ) ; } "
+                               "int * ipool :: allocate<int> ( ) { return nullptr ; }";
+            const char act[] = "struct ipool { template < typename T > T * allocate ( ) { return nullptr ; } } ; "
+                               "struct gp<4> ; "
+                               "int * f ( ) { return gp<4> :: allocate<int> ( ) ; } "
+                               "struct gp<4> : ipool { int * allocate<int> ( ) ; } ; "
+                               "int * gp<4> :: allocate<int> ( ) { return ipool :: allocate<int> ( ) ; }";
             TODO_ASSERT_EQUALS(exp, act, tok(code));
         }
     }
@@ -7250,11 +7387,51 @@ private:
                            "void h ( ) { A<int> :: g<char> ( ) ; } "
                            "struct A<int> { static void g<char> ( ) ; } ; "
                            "void A<int> :: g<char> ( ) { char u ; }";
+        ASSERT_EQUALS(exp, tok(code));
+    }
+
+    void templateSpecializationOfMember() {
+        // an explicit specialization of a member function of a class template
+        const char code[] = "template <class T> struct A { void f(); };\n"
+                            "template <class T> void A<T>::f() { T t; }\n"
+                            "template <> void A<int>::f() { int i; }\n"
+                            "void h() { A<int> a; a.f(); }\n";
+        const char exp[] = "struct A<int> ; "
+                           "void A<int> :: f ( ) { int i ; } "
+                           "void h ( ) { A<int> a ; a . f ( ) ; } "
+                           "struct A<int> { void f ( ) ; } ;";
         const char act[] = "struct A<int> ; "
-                           "template < class U > void A<int> :: g<char> ( ) { U u ; } "
-                           "void h ( ) { A<int> :: g<char> ( ) ; } "
-                           "struct A<int> { static void A<int> :: g<char> ( ) ; template < class U > static void g<char> ( ) ; } ;";
+                           "template < > void A<int> :: f ( ) { int i ; } "
+                           "void h ( ) { A<int> a ; a . f ( ) ; } "
+                           "struct A<int> { void f ( ) ; } ; "
+                           "void A<int> :: f ( ) { int t ; }";
         TODO_ASSERT_EQUALS(exp, act, tok(code));
+    }
+
+    void templateMemberTemplateCall() {
+        // a call of a member template of a class template, the class is instantiated with its own template arguments
+        {
+            const char code[] = "template <class T> struct A { template <class U> T g(U u); };\n"
+                                "template <class T> template <class U> T A<T>::g(U u) { return T(u); }\n"
+                                "int h() { A<int> a; return a.g<char>('c'); }\n";
+            const char exp[] = "struct A<int> ; "
+                               "int h ( ) { A<int> a ; return a . g<char> ( 'c' ) ; } "
+                               "struct A<int> { int g<char> ( char u ) ; } ; "
+                               "int A<int> :: g<char> ( char u ) { return int ( u ) ; }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+        {
+            const char code[] = "template <class T> struct A { template <class U> static T g(U u); };\n"
+                                "template <class T> template <class U> T A<T>::g(U u) { return T(u); }\n"
+                                "int h() { return A<int>::g<char>('c') + A<long>::g<short>(1); }\n";
+            const char exp[] = "struct A<int> ; struct A<long> ; "
+                               "int h ( ) { return A<int> :: g<char> ( 'c' ) + A<long> :: g<short> ( 1 ) ; } "
+                               "struct A<int> { static int g<char> ( char u ) ; } ; "
+                               "struct A<long> { static long g<short> ( short u ) ; } ; "
+                               "long A<long> :: g<short> ( short u ) { return long ( u ) ; } "
+                               "int A<int> :: g<char> ( char u ) { return int ( u ) ; }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
     }
 
     void templateMemberWithoutTemplateHead() {
