@@ -813,6 +813,14 @@ void CheckUnusedVarImpl::checkFunctionVariableUsage_iterateScopes(const Scope* c
             variables.clearConst();
         }
 
+        // the template arguments of a template that is not instantiated, "f < x > ( )"
+        else if (tok->str() == "<" && tok->link()) {
+            for (const Token* tok2 = tok->next(); tok2 != tok->link(); tok2 = tok2->next()) {
+                if (tok2->varId())
+                    variables.read(tok2->varId(), tok2);
+            }
+        }
+
         else if (Token::Match(tok->previous(), "[;{}]")) {
             for (const Token* tok2 = tok->next(); tok2; tok2 = tok2->next()) {
                 if (tok2->varId()) {

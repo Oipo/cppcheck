@@ -199,6 +199,7 @@ private:
         TEST_CASE(localvarstring2); // ticket #2929
         TEST_CASE(localvarconst1);
         TEST_CASE(localvarconst2);
+        TEST_CASE(localvarconst3);
         TEST_CASE(localvarreturn); // ticket #9167
         TEST_CASE(localvarmaybeunused);
         TEST_CASE(localvarrvalue); // ticket #13977
@@ -6500,6 +6501,18 @@ private:
         functionVariableUsage("void foo() {\n"
                               "    const int N = 10;\n"
                               "    struct X { int x[N]; };\n"
+                              "}\n");
+        ASSERT_EQUALS("", errout_str());
+    }
+
+    void localvarconst3() {
+        // the template arguments of a template that is not instantiated
+        functionVariableUsage("template <const char* S> bool comparitor(const char* it);\n"
+                              "template <class T>\n"
+                              "void op(int& error, const char* it) {\n"
+                              "    static constexpr const char* null_string = \"null\";\n"
+                              "    if (!comparitor<null_string>(it))\n"
+                              "        error = 1;\n"
                               "}\n");
         ASSERT_EQUALS("", errout_str());
     }
