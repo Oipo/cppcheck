@@ -83,7 +83,16 @@ struct ValueFlowAnalyzer : Analyzer {
 
     using ProgramState = ProgramMemory::Map;
 
+    // The values of the tracked variables for the program memory
     virtual ProgramState getProgramState() const = 0;
+
+    // The program memory only evaluates the values, so its copies of them need no error paths
+    static ValueFlow::Value withoutPaths(ValueFlow::Value value)
+    {
+        value.errorPath.clear();
+        value.debugPath.clear();
+        return value;
+    }
 
     virtual int getIndirect(const Token* tok) const {
         const ValueFlow::Value* value = getValue(tok);
@@ -1113,7 +1122,7 @@ struct MultiValueFlowAnalyzer : ValueFlowAnalyzer {
             if (!var)
                 continue;
             assert(var->nameToken());
-            ps[var->nameToken()] = p.second;
+            ps[var->nameToken()] = withoutPaths(p.second);
         }
         return ps;
     }
@@ -1388,7 +1397,7 @@ struct ExpressionAnalyzer : SingleValueFlowAnalyzer {
 
     ProgramState getProgramState() const override {
         ProgramState ps;
-        ps[expr] = value;
+        ps[expr] = withoutPaths(value);
         return ps;
     }
 
