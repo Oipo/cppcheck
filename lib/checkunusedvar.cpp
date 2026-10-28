@@ -855,7 +855,8 @@ void CheckUnusedVarImpl::checkFunctionVariableUsage_iterateScopes(const Scope* c
                         tok = tok->previous();
                     break;
                 }
-                if (Token::Match(tok2, "[;({=]"))
+                // a "}" ends the block, a declaration after it is not in this scope
+                if (Token::Match(tok2, "[;({=}]"))
                     break;
             }
         }

@@ -184,6 +184,7 @@ private:
         TEST_CASE(localvaralias22);
         TEST_CASE(localvaralias23);
         TEST_CASE(localvarasm);
+        TEST_CASE(localvarDeclarationAfterScope);
         TEST_CASE(localvarstatic);
         TEST_CASE(localvarextern);
         TEST_CASE(localvardynamic1);
@@ -5372,6 +5373,38 @@ private:
                               "    b = a;\n"
                               "}\n");
         ASSERT_EQUALS("", errout_str());
+    }
+
+    void localvarDeclarationAfterScope() {
+        // the declaration after the last block of the function is not in the function, the asm in the
+        // next function must not clear its variables
+        functionVariableUsage("void g();\n"
+                              "void f() {\n"
+                              "    int y;\n"
+                              "    {\n"
+                              "        g();\n"
+                              "    }\n"
+                              "}\n"
+                              "int z;\n"
+                              "void h() {\n"
+                              "    asm(\"nop\");\n"
+                              "}\n");
+        ASSERT_EQUALS("[test.cpp:3:9]: (style) Unused variable: y [unusedVariable]\n", errout_str());
+
+        functionVariableUsage("void g();\n"
+                              "struct S {\n"
+                              "    void f() {\n"
+                              "        int y;\n"
+                              "        if (b) {\n"
+                              "            g();\n"
+                              "        }\n"
+                              "    }\n"
+                              "    bool b;\n"
+                              "    void h() {\n"
+                              "        asm(\"nop\");\n"
+                              "    }\n"
+                              "};\n");
+        ASSERT_EQUALS("[test.cpp:4:13]: (style) Unused variable: y [unusedVariable]\n", errout_str());
     }
 
     void localvarStruct1() {
