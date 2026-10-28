@@ -1564,12 +1564,28 @@ void TemplateSimplifier::addNamespace(const TokenAndName &templateDeclaration, c
     // decide if namespace needs to be inserted in or appended to token list
     const bool insert = tokStart != tok;
 
+    // the qualification of tok is not added again, "N :: a :: f" in the scope "N :: a"
+    std::string scope = templateDeclaration.scope();
+    bool qualificationRemoved = false;
+    if (insert) {
+        std::string qualification;
+        for (const Token *q = tokStart; q != tok; q = q->tokAt(2))
+            qualification += (qualification.empty() ? "" : " :: ") + q->str();
+        if (scope == qualification)
+            return;
+        if (scope.size() > qualification.size() + 4 &&
+            scope.compare(scope.size() - qualification.size() - 4, std::string::npos, " :: " + qualification) == 0) {
+            scope.resize(scope.size() - qualification.size() - 4);
+            qualificationRemoved = true;
+        }
+    }
+
     std::string::size_type start = 0;
     std::string::size_type end = 0;
     bool inTemplate = false;
     int level = 0;
-    while ((end = templateDeclaration.scope().find(' ', start)) != std::string::npos) {
-        std::string token = templateDeclaration.scope().substr(start, end - start);
+    while ((end = scope.find(' ', start)) != std::string::npos) {
+        std::string token = scope.substr(start, end - start);
         // done if scopes overlap
         if (token == tokStart->str() && tok->strAt(-1) != "::")
             break;
@@ -1596,19 +1612,19 @@ void TemplateSimplifier::addNamespace(const TokenAndName &templateDeclaration, c
         start = end + 1;
     }
     // don't add if it already exists
-    std::string token = templateDeclaration.scope().substr(start, end - start);
-    if (token != tokStart->str() || tok->strAt(-1) != "::") {
+    std::string token = scope.substr(start, end - start);
+    if (qualificationRemoved || token != tokStart->str() || tok->strAt(-1) != "::") {
         if (insert) {
             if (!inTemplate)
-                mTokenList.back()->tokAt(offset)->insertToken(templateDeclaration.scope().substr(start));
+                mTokenList.back()->tokAt(offset)->insertToken(scope.substr(start));
             else
-                mTokenList.back()->tokAt(offset)->str(mTokenList.back()->strAt(offset) + templateDeclaration.scope().substr(start));
+                mTokenList.back()->tokAt(offset)->str(mTokenList.back()->strAt(offset) + scope.substr(start));
             mTokenList.back()->tokAt(offset)->insertToken("::");
         } else {
             if (!inTemplate)
-                mTokenList.addtoken(templateDeclaration.scope().substr(start), tok->linenr(), tok->column(), tok->fileIndex());
+                mTokenList.addtoken(scope.substr(start), tok->linenr(), tok->column(), tok->fileIndex());
             else
-                mTokenList.back()->str(mTokenList.back()->str() + templateDeclaration.scope().substr(start));
+                mTokenList.back()->str(mTokenList.back()->str() + scope.substr(start));
             mTokenList.addtoken("::", tok->linenr(), tok->column(), tok->fileIndex());
         }
     }
@@ -1766,6 +1782,44 @@ static bool isBlockWithoutTemplate(Token *tok)
     return templateInBlock(tok) == TemplateInBlock::No;
 }
 
+// The "template" of the next template head in a chain of template heads, or nullptr
+template<class T>
+static T *nextTemplateHead(T *head)
+{
+    if (!Token::simpleMatch(head, "template <"))
+        return nullptr;
+    T *closing = head->next()->findClosingBracket();
+    return Token::simpleMatch(closing, "> template <") ? closing->next() : nullptr;
+}
+
+// The "template" with the template parameters of the class in a member function of a class template
+// that is implemented outside of the class definition, nameTok is the name of the class. A member
+// template has a template head of its own after the one of the class:
+// "template < class T > template < class U > void A < T > :: f ( U )". When the class is a member of a
+// class template, its template head is the last one. A template template parameter has a "template" in
+// a template head, it is not a template head.
+static Token *findClassTemplateHead(Token *nameTok)
+{
+    Token *first = nullptr;
+    for (Token *prev = nameTok; prev && !Token::Match(prev, "[;{}]"); prev = prev->previous()) {
+        if (prev->str() == "template")
+            first = prev;
+    }
+    bool memberOfTemplate = false;
+    for (const Token *qualifier = nameTok; Token::Match(qualifier->tokAt(-2), "%name%|> ::"); qualifier = qualifier->tokAt(-2)) {
+        if (qualifier->strAt(-2) == ">") {
+            memberOfTemplate = true;
+            break;
+        }
+    }
+    if (!memberOfTemplate)
+        return first;
+    Token *head = first;
+    while (Token *next = nextTemplateHead(head))
+        head = next;
+    return head;
+}
+
 void TemplateSimplifier::expandTemplate(
     const TokenAndName &templateDeclaration,
     const TokenAndName &templateInstantiation,
@@ -1775,26 +1829,16 @@ void TemplateSimplifier::expandTemplate(
 {
     assert(blockSummariesAreValid(mTokenList.front(), mTemplateBlockNamesKnown));
 
-    bool inTemplateDefinition = false;
-    const Token *startOfTemplateDeclaration = nullptr;
-    const Token *endOfTemplateDefinition = nullptr;
-    // The last "template", its parameters are counted when inTemplateDefinition is needed. Once the
-    // end of the template definition is known, that is only at the declaration, at a member function
-    // and at that end, not at every "template" in the token list.
-    const Token *uncountedTemplate = nullptr;
-    const auto isInTemplateDefinition = [&]() {
-        if (uncountedTemplate) {
-            if (Token::simpleMatch(uncountedTemplate->next(), "<")) {
-                std::vector<const Token *> localTypeParametersInDeclaration;
-                getTemplateParametersInDeclaration(uncountedTemplate->tokAt(2), localTypeParametersInDeclaration);
-                inTemplateDefinition = localTypeParametersInDeclaration.size() == typeParametersInDeclaration.size(); // Partial specialization
-            } else {
-                inTemplateDefinition = false; // Only template instantiation
-            }
-            uncountedTemplate = nullptr;
-        }
-        return inTemplateDefinition;
+    // Does the template head that starts at head have as many parameters as the template that is
+    // expanded (not in a partial specialization)
+    const auto hasTemplateParameters = [&](const Token *head) {
+        if (!Token::simpleMatch(head, "template <"))
+            return false; // Only template instantiation
+        std::vector<const Token *> localTypeParametersInDeclaration;
+        getTemplateParametersInDeclaration(head->tokAt(2), localTypeParametersInDeclaration);
+        return localTypeParametersInDeclaration.size() == typeParametersInDeclaration.size();
     };
+    bool inTemplateDefinition = false;
     const Token * const templateDeclarationNameToken = templateDeclaration.nameToken();
     const Token * const templateDeclarationToken = templateDeclaration.paramEnd();
     const bool isClass = templateDeclaration.isClass();
@@ -2078,42 +2122,15 @@ void TemplateSimplifier::expandTemplate(
             addedEnd = nullptr;
         }
 
-        // Only "template", the declaration, the end of the template definition and the member
-        // functions implemented outside of the class definition (they are in a statement with
-        // "template") are of interest. The end of the template definition is not inside a block
-        // that starts after the template definition starts.
-        if ((endOfTemplateDefinition || !isInTemplateDefinition()) && isBlockWithoutTemplate(tok3)) {
+        // Only the declaration and the member functions implemented outside of the class definition
+        // (they are in a statement with "template") are of interest
+        if (isBlockWithoutTemplate(tok3)) {
             tok3 = tok3->link();
             continue;
         }
         if (tok3->str() == "{" && tok3->link())
             blocks.push_back(tok3);
 
-        if ((!endOfTemplateDefinition || tok3 == endOfTemplateDefinition) && isInTemplateDefinition()) {
-            if (!endOfTemplateDefinition) {
-                if (isVariable) {
-                    Token *temp = tok3->findClosingBracket();
-                    if (temp) {
-                        while (temp && temp->str() != ";") {
-                            if (temp->link() && Token::Match(temp, "{|[|("))
-                                temp = temp->link();
-                            temp = temp->next();
-                        }
-                        endOfTemplateDefinition = temp;
-                    }
-                } else if (tok3->str() == "{")
-                    endOfTemplateDefinition = tok3->link();
-            }
-            if (tok3 == endOfTemplateDefinition) {
-                inTemplateDefinition = false;
-                startOfTemplateDeclaration = nullptr;
-            }
-        }
-
-        if (tok3->str()=="template") {
-            uncountedTemplate = tok3;
-            startOfTemplateDeclaration = tok3;
-        }
         if (Token::Match(tok3, "(|["))
             tok3 = tok3->link();
 
@@ -2121,8 +2138,11 @@ void TemplateSimplifier::expandTemplate(
 
         // Start of template..
         if (tok3 == templateDeclarationToken) {
-            // count before the declaration is changed
-            isInTemplateDefinition();
+            // the parameters of the last template head, the one that ends at the declaration
+            const Token *head = templateDeclaration.token();
+            while (head->next()->findClosingBracket() != templateDeclarationToken && nextTemplateHead(head))
+                head = nextTemplateHead(head);
+            inTemplateDefinition = hasTemplateParameters(head);
             changedStart = tok3;
             tok3 = tok3->next();
             if (tok3->str() == "static")
@@ -2132,20 +2152,13 @@ void TemplateSimplifier::expandTemplate(
         // member function implemented outside class definition
         else if (Token::Match(tok3, "%name% <") &&
                  templateInstantiation.name() == tok3->str() &&
-                 isInTemplateDefinition() &&
                  instantiateMatch(tok3, typeParametersInDeclaration.size(), templateDeclaration.isVariadic(), ":: ~| %name% (")) {
             // there must be template..
-            bool istemplate = false;
-            Token * tok5 = nullptr; // start of function return type
-            for (Token *prev = tok3; prev && !Token::Match(prev, "[;{}]"); prev = prev->previous()) {
-                if (prev->str() == "template") {
-                    istemplate = true;
-                    tok5 = prev;
-                    break;
-                }
-            }
-            if (!istemplate)
+            Token * tok5 = findClassTemplateHead(tok3); // start of function return type
+            if (!tok5 || !hasTemplateParameters(tok5))
                 continue;
+            inTemplateDefinition = true;
+            const Token * const startOfTemplateDeclaration = tok5;
 
             const Token *tok4 = tok3->next()->findClosingBracket();
             while (tok4 && tok4->str() != "(")

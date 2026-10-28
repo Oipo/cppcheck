@@ -329,6 +329,13 @@ private:
         TEST_CASE(template_shift_negative); // shift folding with a negative operand
 
         TEST_CASE(templateUsageInBlocks); // blocks that are skipped when looking for template usage
+        TEST_CASE(templateMemberTemplateOutOfLine);
+        TEST_CASE(templateTemplateParameterOutOfLine);
+        TEST_CASE(templateMemberOfMemberTemplateOutOfLine);
+        TEST_CASE(templateExplicitInstantiationOfMember);
+        TEST_CASE(templateSpecializationOfMemberTemplate);
+        TEST_CASE(templateMemberWithoutTemplateHead);
+        TEST_CASE(templateQualifiedMemberTemplate);
 
         TEST_CASE(dumpTemplateArgFrom);
     }
@@ -3140,22 +3147,11 @@ private:
                                 "constexpr decltype(auto) a<d>::operator()(b &&) const {}\n";
             const char exp[] = "struct a<int> ; "
                                "a<int> c ; "
-                               "template < typename d > "
-                               "template < typename b > "
-                               "constexpr decltype ( auto ) a < d > :: operator() ( b && ) const { } "
-                               "struct a<int> { "
-                               "template < typename b > constexpr decltype ( auto ) operator() ( b && ) const ; "
-                               "} ;";
-            const char act[] = "struct a<int> ; "
-                               "a<int> c ; "
-                               "template < typename d > "
-                               "template < typename b > "
-                               "constexpr decltype ( auto ) a < d > :: operator() ( b && ) const { } "
                                "struct a<int> { "
                                "template < typename b > constexpr decltype ( auto ) operator() ( b && ) const ; "
                                "} ; "
-                               "constexpr decltype ( auto ) a<int> :: operator() ( b && ) const { }";
-            TODO_ASSERT_EQUALS(exp, act, tok(code));
+                               "template < typename b > constexpr decltype ( auto ) a<int> :: operator() ( b && ) const { }";
+            ASSERT_EQUALS(exp, tok(code));
         }
         {
             const char code[] = "template <typename> struct a {\n"
@@ -3168,26 +3164,12 @@ private:
                                 "void bar() { a<int>::foo<char>(); }\n";
             const char exp[] = "struct a<int> ; "
                                "a<int> c ; "
-                               "template < typename d > "
-                               "template < typename b > "
-                               "void a < d > :: foo ( ) { } "
-                               "void bar ( ) { a<int> :: foo < char > ( ) ; } "
+                               "void bar ( ) { a<int> :: foo<char> ( ) ; } "
                                "struct a<int> { "
-                               "template < typename b > static void foo ( ) ; "
                                "static void foo<char> ( ) ; "
                                "} ; "
                                "void a<int> :: foo<char> ( ) { }";
-            const char act[] = "struct a<int> ; "
-                               "a<int> c ; "
-                               "template < typename d > "
-                               "template < typename b > "
-                               "void a < d > :: foo ( ) { } "
-                               "void bar ( ) { a<int> :: foo < char > ( ) ; } "
-                               "struct a<int> { "
-                               "template < typename b > static void foo ( ) ; "
-                               "} ; "
-                               "void a<int> :: foo ( ) { }";
-            TODO_ASSERT_EQUALS(exp, act, tok(code));
+            ASSERT_EQUALS(exp, tok(code));
         }
         {
             const char code[] = "template <typename> struct a {\n"
@@ -3198,24 +3180,12 @@ private:
                                 "void a<d>::foo() {}\n"
                                 "void bar() { a<int>::foo<char>(); }\n";
             const char exp[] = "struct a<int> ; "
-                               "template < typename d > "
-                               "template < typename b > "
-                               "void a < d > :: foo ( ) { } "
-                               "void bar ( ) { a<int> :: foo < char > ( ) ; } "
+                               "void bar ( ) { a<int> :: foo<char> ( ) ; } "
                                "struct a<int> { "
                                "static void foo<char> ( ) ; "
                                "} ; "
                                "void a<int> :: foo<char> ( ) { }";
-            const char act[] = "struct a<int> ; "
-                               "template < typename d > "
-                               "template < typename b > "
-                               "void a < d > :: foo ( ) { } "
-                               "void bar ( ) { a<int> :: foo < char > ( ) ; } "
-                               "struct a<int> { "
-                               "template < typename b > static void foo ( ) ; "
-                               "} ; "
-                               "void a<int> :: foo ( ) { }";
-            TODO_ASSERT_EQUALS(exp, act, tok(code));
+            ASSERT_EQUALS(exp, tok(code));
         }
     }
 
@@ -7136,6 +7106,218 @@ private:
                               "void h() { f<int>(); f<char>(); A<int> x; }\n";
         ASSERT_EQUALS("int f<int> ( ) ; char f<char> ( ) ; struct A<int> ; void g ( ) { bool b ; b = & f<int> < & f<char> ; } void h ( ) { f<int> ( ) ; f<char> ( ) ; A<int> x ; } struct A<int> { int a ; } ; int f<int> ( ) { return int ( ) ; } char f<char> ( ) { return char ( ) ; }",
                       tok(code12));
+    }
+
+    void templateMemberTemplateOutOfLine() {
+        // the template head of a member template follows the one of the class, it is copied with the member
+        {
+            const char code[] = "template <class T> struct A { template <class U> void g(U); };\n"
+                                "template <class T> template <class U> void A<T>::g(U) {}\n"
+                                "A<int> a;\n";
+            const char exp[] = "struct A<int> ; "
+                               "A<int> a ; "
+                               "struct A<int> { template < class U > void g ( U ) ; "
+                               "} ; "
+                               "template < class U > void A<int> :: g ( U ) { }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+        {
+            const char code[] = "template <class T> struct A { template <class U, class W> void g(U, W); };\n"
+                                "template <class T> template <class U, class W> void A<T>::g(U, W) {}\n"
+                                "A<int> a;\n";
+            const char exp[] = "struct A<int> ; "
+                               "A<int> a ; "
+                               "struct A<int> { template < class U , class W > void g ( U , W ) ; "
+                               "} ; "
+                               "template < class U , class W > void A<int> :: g ( U , W ) { }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+        {
+            const char code[] = "template <class T, class S> struct A { template <class U> void g(U); void f(); };\n"
+                                "template <class T, class S> template <class U> void A<T, S>::g(U) {}\n"
+                                "template <class T, class S> void A<T, S>::f() {}\n"
+                                "A<int, char> a;\n";
+            const char exp[] = "struct A<int,char> ; "
+                               "A<int,char> a ; "
+                               "struct A<int,char> { template < class U > void g ( U ) ; "
+                               "void f ( ) ; "
+                               "} ; "
+                               "template < class U > void A<int,char> :: g ( U ) { } "
+                               "void A<int,char> :: f ( ) { }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+        {
+            const char code[] = "namespace N { template <class T> struct A { template <class U> T g(U); }; }\n"
+                                "template <class T> template <class U> T N::A<T>::g(U u) { return T(u); }\n"
+                                "N::A<int> a;\n";
+            const char exp[] = "namespace N { struct A<int> ; "
+                               "} N :: A<int> a ; "
+                               "struct N :: A<int> { template < class U > int g ( U ) ; "
+                               "} ; "
+                               "template < class U > int N :: A<int> :: g ( U u ) { return int ( u ) ; "
+                               "}";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+    }
+
+    void templateTemplateParameterOutOfLine() {
+        // a template template parameter has a "template" in the template head of the class
+        {
+            const char code[] = "template <class T> struct V {};\n"
+                                "template <template <class> class TT> struct A { void f(); };\n"
+                                "template <template <class> class TT> void A<TT>::f() {}\n"
+                                "A<V> a;\n";
+            const char exp[] = "template < class T > struct V { } ; "
+                               "struct A<V> ; "
+                               "A<V> a ; "
+                               "struct A<V> { void f ( ) ; "
+                               "} ; "
+                               "void A<V> :: f ( ) { }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+        {
+            const char code[] = "template <class T> struct V {};\n"
+                                "template <template <class> class TT, class X> struct A { void f(); };\n"
+                                "template <template <class> class TT, class X> void A<TT, X>::f() {}\n"
+                                "A<V, int> a;\n";
+            const char exp[] = "template < class T > struct V { } ; "
+                               "struct A<V,int> ; "
+                               "A<V,int> a ; "
+                               "struct A<V,int> { void f ( ) ; "
+                               "} ; "
+                               "void A<V,int> :: f ( ) { }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+        {
+            const char code[] = "template <class T> struct V {};\n"
+                                "template <class X, template <class> class TT> struct A { void f(); };\n"
+                                "template <class X, template <class> class TT> void A<X, TT>::f() {}\n"
+                                "A<int, V> a;\n";
+            const char exp[] = "template < class T > struct V { } ; "
+                               "struct A<int,V> ; "
+                               "A<int,V> a ; "
+                               "struct A<int,V> { void f ( ) ; "
+                               "} ; "
+                               "void A<int,V> :: f ( ) { }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+    }
+
+    void templateMemberOfMemberTemplateOutOfLine() {
+        // the member function of a member class template of a class template
+        {
+            const char code[] = "template <class T> struct Outer { template <class U> struct Inner { void f(); }; };\n"
+                                "template <class T> template <class U> void Outer<T>::Inner<U>::f() {}\n"
+                                "Outer<int>::Inner<char> x;\n";
+            const char exp[] = "struct Outer<int> ; "
+                               "Outer<int> :: Inner<char> x ; "
+                               "struct Outer<int> { struct Inner<char> ; "
+                               "} ; "
+                               "void Outer<int> :: Inner<char> :: f ( ) { } "
+                               "struct Outer<int> :: Inner<char> { void f ( ) ; "
+                               "} ;";
+            const char act[] = "struct Outer<int> ; "
+                               "template < class T > template < class U > void Outer < T > :: Inner < U > :: f ( ) { } Outer<int> :: Inner<char> x ; "
+                               "struct Outer<int> { struct Inner<char> ; "
+                               "} ; "
+                               "void Outer < T > :: Inner<char> :: f ( ) { } "
+                               "struct Outer<int> :: Inner<char> { void f ( ) ; "
+                               "} ;";
+            TODO_ASSERT_EQUALS(exp, act, tok(code));
+        }
+    }
+
+    void templateExplicitInstantiationOfMember() {
+        {
+            const char code[] = "template <class T> struct A { void f(); };\n"
+                                "template <class T> void A<T>::f() {}\n"
+                                "template void A<int>::f();\n";
+            const char exp[] = "struct A<int> ; "
+                               "struct A<int> { void f ( ) ; "
+                               "} ; "
+                               "void A<int> :: f ( ) { }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+    }
+
+    void templateSpecializationOfMemberTemplate() {
+        // the member template of an explicit specialization, its template parameters are in the last template head
+        const char code[] = "template <class T> struct A { template <class U> static void g(); };\n"
+                            "template <> template <class U> void A<int>::g() { U u; }\n"
+                            "void h() { A<int>::g<char>(); }\n";
+        const char exp[] = "struct A<int> ; "
+                           "void h ( ) { A<int> :: g<char> ( ) ; } "
+                           "struct A<int> { static void g<char> ( ) ; } ; "
+                           "void A<int> :: g<char> ( ) { char u ; }";
+        const char act[] = "struct A<int> ; "
+                           "template < class U > void A<int> :: g<char> ( ) { U u ; } "
+                           "void h ( ) { A<int> :: g<char> ( ) ; } "
+                           "struct A<int> { static void A<int> :: g<char> ( ) ; template < class U > static void g<char> ( ) ; } ;";
+        TODO_ASSERT_EQUALS(exp, act, tok(code));
+    }
+
+    void templateMemberWithoutTemplateHead() {
+        // a member function of a member class template without a template head is not a member of the template
+        const char code[] = "template <class U> struct Inner { void f(); };\n"
+                            "void X<int>::Inner<char>::f() {}\n"
+                            "Inner<char> i;\n";
+        const char exp[] = "struct Inner<char> ; "
+                           "void X < int > :: Inner<char> :: f ( ) { } "
+                           "Inner<char> i ; "
+                           "struct Inner<char> { void f ( ) ; } ;";
+        ASSERT_EQUALS(exp, tok(code));
+    }
+
+    void templateQualifiedMemberTemplate() {
+        // the qualification of a member template that is implemented outside of its class is not added twice
+        {
+            const char code[] = "namespace N { struct a { template <typename b> static void foo(); }; }\n"
+                                "template <typename b> void N::a::foo() {}\n"
+                                "void bar() { N::a::foo<char>(); }\n";
+            const char exp[] = "namespace N { struct a { static void foo<char> ( ) ; "
+                               "} ; "
+                               "} "
+                               "void bar ( ) { N :: a :: foo<char> ( ) ; "
+                               "} "
+                               "void N :: a :: foo<char> ( ) { }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+        {
+            const char code[] = "namespace M { namespace N { struct a { template <typename b> static void foo(); }; } }\n"
+                                "namespace M { template <typename b> void N::a::foo() {} }\n"
+                                "void bar() { M::N::a::foo<char>(); }\n";
+            const char exp[] = "namespace M { namespace N { struct a { static void foo<char> ( ) ; "
+                               "} ; "
+                               "} } "
+                               "void bar ( ) { M :: N :: a :: foo<char> ( ) ; "
+                               "} "
+                               "void M :: N :: a :: foo<char> ( ) { }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+        {
+            const char code[] = "namespace N { struct a { template <typename b> static void foo(); }; }\n"
+                                "namespace N { template <typename b> void a::foo() {} }\n"
+                                "void bar() { N::a::foo<char>(); }\n";
+            const char exp[] = "namespace N { struct a { static void foo<char> ( ) ; "
+                               "} ; "
+                               "} "
+                               "void bar ( ) { N :: a :: foo<char> ( ) ; "
+                               "} "
+                               "void N :: a :: foo<char> ( ) { }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
+        {
+            const char code[] = "namespace a { struct a { template <typename b> static void foo(); }; }\n"
+                                "namespace a { template <typename b> void a::foo() {} }\n"
+                                "void bar() { a::a::foo<char>(); }\n";
+            const char exp[] = "namespace a { struct a { static void foo<char> ( ) ; "
+                               "} ; "
+                               "} "
+                               "void bar ( ) { a :: a :: foo<char> ( ) ; "
+                               "} "
+                               "void a :: a :: foo<char> ( ) { }";
+            ASSERT_EQUALS(exp, tok(code));
+        }
     }
 
     void dumpTemplateArgFrom() {
