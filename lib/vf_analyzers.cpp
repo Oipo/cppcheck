@@ -973,8 +973,9 @@ struct MultiValueFlowAnalyzer : ValueFlowAnalyzer {
         : ValueFlowAnalyzer(set) {
         // Insert in the order of the declarations, so the order of the maps does not depend on the heap addresses
         std::vector<const std::pair<const Variable* const, ValueFlow::Value>*> sortedArgs;
-        for (const auto& p:args)
-            sortedArgs.push_back(&p);
+        std::transform(args.cbegin(), args.cend(), std::back_inserter(sortedArgs), [](const std::pair<const Variable* const, ValueFlow::Value>& p) {
+            return &p;
+        });
         std::sort(sortedArgs.begin(), sortedArgs.end(), [](const std::pair<const Variable* const, ValueFlow::Value>* a, const std::pair<const Variable* const, ValueFlow::Value>* b) {
             return a->first->declarationId() < b->first->declarationId();
         });

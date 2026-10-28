@@ -1880,12 +1880,11 @@ void Tokenizer::simplifyTypedefCpp()
                 if (tok2->link()) { // Pre-check for performance
                     // check for end of scope
                     if (tok2->str() == "}") {
-                        for (auto it = blocks.rbegin(); it != blocks.rend(); ++it) {
-                            if ((*it)->link() == tok2) {
-                                blocks.erase(std::prev(it.base()), blocks.end());
-                                break;
-                            }
-                        }
+                        const auto it = std::find_if(blocks.rbegin(), blocks.rend(), [&](const Token *block) {
+                            return block->link() == tok2;
+                        });
+                        if (it != blocks.rend())
+                            blocks.erase(std::prev(it.base()), blocks.end());
 
                         // check for end of member function, the end of a brace initializer of a
                         // member or a base class is not the end of the constructor
@@ -3180,7 +3179,7 @@ bool Tokenizer::simplifyUsing()
         auto it = templateParametersEnds.find(tok);
         if (it == templateParametersEnds.end())
             it = templateParametersEnds.emplace(tok, tok->findClosingBracket()).first;
-        assert(it->second == tok->findClosingBracket());
+        assert(it->second == utils::as_const(*tok).findClosingBracket());
         return it->second;
     };
 

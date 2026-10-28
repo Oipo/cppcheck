@@ -31,8 +31,10 @@
 #include <algorithm>
 #include <cassert>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <stack>
 #include <type_traits>
 #include <unordered_map>
@@ -874,8 +876,9 @@ void TemplateSimplifier::getTemplateInstantiations()
 
     // the first declaration with a full name
     std::unordered_map<std::string, const TokenAndName *> declarationsByFullName;
-    for (const auto & decl : mTemplateDeclarations)
-        declarationsByFullName.emplace(decl.fullName(), &decl);
+    std::transform(mTemplateDeclarations.cbegin(), mTemplateDeclarations.cend(), std::inserter(declarationsByFullName, declarationsByFullName.end()), [](const TokenAndName &decl) {
+        return std::make_pair(decl.fullName(), &decl);
+    });
 
     const Token *skip = nullptr;
 
@@ -1751,12 +1754,13 @@ static std::uint64_t nameBit(const std::string &name)
 // and the last component of its full name is the last component of its name.
 static std::uint64_t nameBits(const Token *tok)
 {
-    std::uint64_t bits = nameBit(tok->str()) | nameBit(lastNameComponent(tok->str()));
-    if (const auto *pointers = tok->templateSimplifierPointers()) {
-        for (const TemplateSimplifier::TokenAndName *p : *pointers)
-            bits |= nameBit(lastNameComponent(p->fullName()));
-    }
-    return bits;
+    const std::uint64_t bits = nameBit(tok->str()) | nameBit(lastNameComponent(tok->str()));
+    const auto *pointers = tok->templateSimplifierPointers();
+    if (!pointers)
+        return bits;
+    return std::accumulate(pointers->cbegin(), pointers->cend(), bits, [](std::uint64_t b, const TemplateSimplifier::TokenAndName *p) {
+        return b | nameBit(lastNameComponent(p->fullName()));
+    });
 }
 
 // Compute the summaries of the blocks from start up to end, f(block, hasTemplate, names) is called

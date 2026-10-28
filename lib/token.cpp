@@ -936,9 +936,9 @@ const Token * Token::findClosingBracket() const
     unsigned int depth = 0;
     for (closing = this; closing != nullptr; closing = closing->next()) {
         // most tokens have one character, they are compared once
-        const std::string &str = closing->str();
-        if (str.size() == 1) {
-            switch (str[0]) {
+        const std::string &tokStr = closing->str();
+        if (tokStr.size() == 1) {
+            switch (tokStr[0]) {
             case '{':
             case '[':
             case '(':
@@ -972,7 +972,7 @@ const Token * Token::findClosingBracket() const
             default:
                 break;
             }
-        } else if (str == ">>" || str == ">>=") {
+        } else if (tokStr == ">>" || tokStr == ">>=") {
             if (depth == 1 && !isDecl())
                 continue;
             if (depth <= 2)
