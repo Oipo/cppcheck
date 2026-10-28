@@ -887,45 +887,73 @@ const Token * Token::findClosingBracket() const
 
     const Token *closing = nullptr;
     const bool templateParameter(strAt(-1) == "template");
-    std::set<std::string> templateParameters;
+    std::vector<const Token *> templateParameters; // the names of the template parameters
+    const auto isTemplateParameter = [&templateParameters](const std::string &name) {
+        return std::any_of(templateParameters.cbegin(), templateParameters.cend(), [&name](const Token *param) {
+            return param->str() == name;
+        });
+    };
 
-    bool isDecl = true;
-    for (const Token *prev = previous(); prev; prev = prev->previous()) {
-        if (prev->str() == "=")
-            isDecl = false;
-        if (Token::simpleMatch(prev, "template <"))
-            isDecl = true;
-        if (Token::Match(prev, "[;{}]"))
-            break;
-    }
+    // only needed for a ">>", which is rare
+    const auto isDecl = [this]() {
+        bool decl = true;
+        for (const Token *prev = previous(); prev; prev = prev->previous()) {
+            if (prev->str() == "=")
+                decl = false;
+            if (Token::simpleMatch(prev, "template <"))
+                decl = true;
+            if (Token::Match(prev, "[;{}]"))
+                break;
+        }
+        return decl;
+    };
 
     unsigned int depth = 0;
     for (closing = this; closing != nullptr; closing = closing->next()) {
-        if (Token::Match(closing, "{|[|(")) {
-            closing = closing->link();
-            if (!closing)
-                return nullptr; // #6803
-        } else if (Token::Match(closing, "}|]|)|;"))
-            return nullptr;
-        // we can make some guesses for template parameters
-        else if (closing->str() == "<" && closing->previous() &&
-                 (closing->previous()->isName() || Token::simpleMatch(closing->previous(), "]") || isOperator(closing->previous())) &&
-                 (templateParameter ? templateParameters.find(closing->strAt(-1)) == templateParameters.end() : true))
-            ++depth;
-        else if (closing->str() == ">") {
-            if (--depth == 0)
-                return closing;
-        } else if (closing->str() == ">>" || closing->str() == ">>=") {
-            if (!isDecl && depth == 1)
+        // most tokens have one character, they are compared once
+        const std::string &str = closing->str();
+        if (str.size() == 1) {
+            switch (str[0]) {
+            case '{':
+            case '[':
+            case '(':
+                closing = closing->link();
+                if (!closing)
+                    return nullptr; // #6803
+                break;
+            case '}':
+            case ']':
+            case ')':
+            case ';':
+                return nullptr;
+            case '<':
+                // we can make some guesses for template parameters
+                if (closing->previous() &&
+                    (closing->previous()->isName() || Token::simpleMatch(closing->previous(), "]") || isOperator(closing->previous())) &&
+                    (templateParameter ? !isTemplateParameter(closing->strAt(-1)) : true))
+                    ++depth;
+                break;
+            case '>':
+                if (--depth == 0)
+                    return closing;
+                break;
+            case ',':
+            case '=':
+                // save named template parameter
+                if (templateParameter && depth == 1 &&
+                    closing->previous()->isName() && !Token::Match(closing->previous(), "class|typename|.") && !Token::Match(closing->tokAt(-2), "=|::"))
+                    templateParameters.push_back(closing->previous());
+                break;
+            default:
+                break;
+            }
+        } else if (str == ">>" || str == ">>=") {
+            if (depth == 1 && !isDecl())
                 continue;
             if (depth <= 2)
                 return closing;
             depth -= 2;
         }
-        // save named template parameter
-        else if (templateParameter && depth == 1 && Token::Match(closing, "[,=]") &&
-                 closing->previous()->isName() && !Token::Match(closing->previous(), "class|typename|.") && !Token::Match(closing->tokAt(-2), "=|::"))
-            templateParameters.insert(closing->strAt(-1));
     }
 
     return closing;

@@ -3172,11 +3172,23 @@ bool Tokenizer::simplifyUsing()
 
     const unsigned int maxReplacementTokens = 1000; // limit the number of tokens we replace
 
+    // The end of the template parameters of a template head, "template <" is looked at for every type
+    // alias. The template heads are not changed below: the template parameters are skipped, and a
+    // template declaration with a template parameter with the name of the type alias is skipped.
+    std::unordered_map<const Token *, Token *> templateParametersEnds;
+    const auto findTemplateParametersEnd = [&templateParametersEnds](Token *tok) {
+        auto it = templateParametersEnds.find(tok);
+        if (it == templateParametersEnds.end())
+            it = templateParametersEnds.emplace(tok, tok->findClosingBracket()).first;
+        assert(it->second == tok->findClosingBracket());
+        return it->second;
+    };
+
     // the blocks that can be skipped when looking for a type alias, the type aliases in template
     // declarations are not simplified
     std::unordered_set<std::string> usingNames;
     bool blocksSummarized = false;
-    const auto summarizeBlocks = [&usingNames](Token *start, const Token *end) {
+    const auto summarizeBlocks = [&usingNames, &findTemplateParametersEnd](Token *start, const Token *end) {
         struct Block {
             Token *start;
             bool scope;
@@ -3201,7 +3213,7 @@ bool Tokenizer::simplifyUsing()
                 }
             } else if (Token::Match(tok, "namespace|class|struct|union %name% {|:|::|<") ||
                        Token::Match(tok, "using namespace %name% ;|::") ||
-                       (Token::Match(tok, "template < !!>") && !tok->next()->findClosingBracket()) ||
+                       (Token::Match(tok, "template < !!>") && !findTemplateParametersEnd(tok->next())) ||
                        (tok->str() == "(" && isMemberFunction(tok))) {
                 // what changes the scope or what is skipped after the block, an enum body is skipped
                 // in the block (findGarbageCode() does not allow a template without '>')
@@ -3256,7 +3268,7 @@ bool Tokenizer::simplifyUsing()
         // skip template declarations
         if (Token::Match(tok, "template < !!>")) {
             // add template record type to scope info
-            const Token *end = tok->next()->findClosingBracket();
+            const Token *end = findTemplateParametersEnd(tok->next());
             if (end && Token::Match(end->next(), "class|struct|union %name%"))
                 currentScope->recordTypes.insert(end->strAt(2));
 
@@ -3480,7 +3492,7 @@ bool Tokenizer::simplifyUsing()
             }
 
             if (Token::Match(tok1, "template < !!>")) {
-                Token *paramsEnd = tok1->next()->findClosingBracket();
+                Token *paramsEnd = findTemplateParametersEnd(tok1->next());
                 bool shadowed = !paramsEnd;
                 for (const Token *param = tok1->next(); !shadowed && param != paramsEnd; param = param->next())
                     shadowed = param->str() == nameToken->str();
