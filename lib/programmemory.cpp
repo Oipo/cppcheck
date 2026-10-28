@@ -530,6 +530,11 @@ static ProgramMemory getInitialProgramState(const Token* tok,
     return pm;
 }
 
+struct ProgramMemoryState::ChangedCache {
+    std::unordered_map<std::tuple<const Token*, const Token*, const Token*>, const Token*, ChangedKeyHash> results;
+    ExpressionChangedMemo memo;
+};
+
 ProgramMemoryState::ProgramMemoryState(const Settings& s) : settings(s), changedCache(std::make_shared<ChangedCache>())
 {}
 
@@ -581,6 +586,22 @@ void ProgramMemoryState::assume(const Token* tok, bool b, bool isEmpty, const To
     replace(std::move(pm), origin);
 }
 
+static const Token* findChangedCached(ProgramMemoryState::ChangedCache& cache,
+                                      const Token* expr,
+                                      const Token* start,
+                                      const Token* end,
+                                      const Settings& settings)
+{
+    const auto key = std::make_tuple(expr, start, end);
+    const auto it = cache.results.find(key);
+    if (it != cache.results.end())
+        return it->second;
+    const Token* modified = findExpressionChanged(expr, start, end, settings, cache.memo);
+    assert(modified == findExpressionChanged(expr, start, end, settings));
+    cache.results.emplace(key, modified);
+    return modified;
+}
+
 ProgramMemoryState::FindChangedFn ProgramMemoryState::getCachedFindExpressionChanged(bool skipDeadCode) const
 {
     // Structural findExpressionChanged() is pure, so memoize it in changedCache (never invalidated).
@@ -594,11 +615,7 @@ ProgramMemoryState::FindChangedFn ProgramMemoryState::getCachedFindExpressionCha
     return [cache, sp, snapshot, skipDeadCode, evalCache](const Token* expr,
                                                           const Token* start,
                                                           const Token* end) -> const Token* {
-        const auto key = std::make_tuple(expr, start, end);
-        const auto it = cache->find(key);
-        const Token* modified = (it != cache->end())
-                                    ? it->second
-                                    : cache->emplace(key, findExpressionChanged(expr, start, end, *sp)).first->second;
+        const Token* modified = findChangedCached(*cache, expr, start, end, *sp);
         if (!skipDeadCode || !modified)
             return modified;
         auto eval = [&](const Token* cond) -> std::vector<MathLib::bigint> {

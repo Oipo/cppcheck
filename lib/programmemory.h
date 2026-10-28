@@ -172,8 +172,7 @@ struct ProgramMemoryState {
             return seed;
         }
     };
-    using ChangedCache =
-        std::unordered_map<std::tuple<const Token*, const Token*, const Token*>, const Token*, ChangedKeyHash>;
+    struct ChangedCache;
     // The token modifying expr between start and end, or nullptr.
     using FindChangedFn = std::function<const Token*(const Token* expr, const Token* start, const Token* end)>;
 

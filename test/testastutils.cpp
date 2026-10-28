@@ -26,6 +26,8 @@
 
 #include <cstdint>
 #include <cstring>
+#include <string>
+#include <vector>
 
 class TestAstUtils : public TestFixture {
 public:
@@ -45,6 +47,7 @@ private:
         TEST_CASE(isVariableChangedTest);
         TEST_CASE(isVariableChangedByFunctionCallTest);
         TEST_CASE(isExpressionChangedTest);
+        TEST_CASE(findExpressionChangedMemoTest);
         TEST_CASE(nextAfterAstRightmostLeafTest);
         TEST_CASE(isUsedAsBool);
     }
@@ -447,6 +450,98 @@ private:
                                           "s .",
                                           "{ (",
                                           "}"));
+    }
+
+    static int tokenIndex(const Token* tok)
+    {
+        return tok ? static_cast<int>(tok->index()) : -1;
+    }
+
+    // With one memo, the queries of all start and end tokens (in the order given by stride, 0 is backward)
+    // give the results of findExpressionChanged() without a memo
+#define findExpressionChangedMemo(...) findExpressionChangedMemo_(__FILE__, __LINE__, __VA_ARGS__)
+    template<size_t size>
+    void findExpressionChangedMemo_(const char* file, int line, const char (&code)[size], const char var[], std::size_t stride)
+    {
+        const Settings settings = settingsBuilder().library("std.cfg").build();
+        SimpleTokenizer tokenizer(settings, *this);
+        ASSERT_LOC(tokenizer.tokenize(code), file, line);
+        const Token* const expr = Token::findsimplematch(tokenizer.tokens(), var, strlen(var));
+        ASSERT_LOC(expr, file, line);
+        std::vector<const Token*> tokens;
+        for (const Token* tok = tokenizer.tokens(); tok; tok = tok->next())
+            tokens.push_back(tok);
+        tokens.push_back(nullptr);
+        const std::size_t n = tokens.size() * tokens.size();
+        ExpressionChangedMemo memo;
+        for (std::size_t i = 0; i < n; ++i) {
+            const std::size_t q = stride == 0 ? n - 1 - i : (i * stride) % n;
+            const Token* const start = tokens[q / tokens.size()];
+            const Token* const end = tokens[q % tokens.size()];
+            if (!start)
+                continue;
+            const std::string msg = "start " + std::to_string(tokenIndex(start)) + ", end " + std::to_string(tokenIndex(end));
+            ASSERT_EQUALS_LOC_MSG(tokenIndex(findExpressionChanged(expr, start, end, settings)),
+                                  tokenIndex(findExpressionChanged(expr, start, end, settings, memo)),
+                                  msg,
+                                  file,
+                                  line);
+        }
+    }
+
+    void findExpressionChangedMemoTest()
+    {
+        const char code[] = "void g(int&);\n"
+                            "void f(int x, int y) {\n"
+                            "    y = x;\n"
+                            "    x = 1;\n"
+                            "    y = x + y;\n"
+                            "    g(x);\n"
+                            "    y++;\n"
+                            "    x += y;\n"
+                            "    return;\n"
+                            "}\n";
+        // forward, backward and scattered, for a variable and for an expression of two variables
+        for (const std::size_t stride : { 1, 0, 7919 }) {
+            findExpressionChangedMemo(code, "x ;", stride);
+            findExpressionChangedMemo(code, "x + y", stride);
+        }
+
+        {
+            const Settings settings = settingsBuilder().library("std.cfg").build();
+            SimpleTokenizer tokenizer(settings, *this);
+            ASSERT(tokenizer.tokenize(code));
+            const Token* const x = Token::findsimplematch(tokenizer.tokens(), "x ;");
+            const Token* const set = Token::findsimplematch(x, "x = 1");
+            const Token* const call = Token::findsimplematch(x, "g ( x )")->tokAt(2);
+            ExpressionChangedMemo memo;
+            // a clean range, then a change after it, then a start inside the clean range
+            ASSERT(!findExpressionChanged(x, x, set->previous(), settings, memo));
+            ASSERT_EQUALS(tokenIndex(set), tokenIndex(findExpressionChanged(x, x, nullptr, settings, memo)));
+            ASSERT_EQUALS(tokenIndex(set), tokenIndex(findExpressionChanged(x, x->next(), set->next(), settings, memo)));
+            // an end before the change, and a start after it
+            ASSERT(!findExpressionChanged(x, x->next(), set, settings, memo));
+            ASSERT_EQUALS(tokenIndex(call), tokenIndex(findExpressionChanged(x, set->next(), nullptr, settings, memo)));
+        }
+        {
+            const Settings settings = settingsBuilder().library("std.cfg").build();
+            SimpleTokenizer tokenizer(settings, *this);
+            ASSERT(tokenizer.tokenize(code));
+            const Token* const x = Token::findsimplematch(tokenizer.tokens(), "x ;");
+            const Token* const set = Token::findsimplematch(x, "x = 1");
+            const Token* const call = Token::findsimplematch(x, "g ( x )");
+            ExpressionChangedMemo memo;
+            // a checked range after the end does not extend the check past the end
+            ASSERT(findExpressionChanged(x, call->tokAt(4), nullptr, settings, memo));
+            ASSERT(!findExpressionChanged(x, set->next(), call, settings, memo));
+            // the unchecked tokens between the end and the checked range after it
+            ASSERT_EQUALS(tokenIndex(call->tokAt(2)), tokenIndex(findExpressionChanged(x, set->next(), nullptr, settings, memo)));
+            // a checked range before the start does not cover the unchecked tokens between them
+            ExpressionChangedMemo memo2;
+            ASSERT(!findExpressionChanged(x, x, x->next(), settings, memo2));
+            ASSERT(!findExpressionChanged(x, set->next(), call, settings, memo2));
+            ASSERT_EQUALS(tokenIndex(set), tokenIndex(findExpressionChanged(x, x->next(), nullptr, settings, memo2)));
+        }
     }
 
 #define nextAfterAstRightmostLeaf(...) nextAfterAstRightmostLeaf_(__FILE__, __LINE__, __VA_ARGS__)

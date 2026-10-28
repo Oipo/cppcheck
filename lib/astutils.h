@@ -25,8 +25,10 @@
 #include <cstdint>
 #include <functional>
 #include <list>
+#include <map>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -366,6 +368,26 @@ CPPCHECKLIB const Token* findExpressionChanged(const Token* expr,
                                                const Token* end,
                                                const Settings& settings,
                                                int depth = 20);
+
+/// The token ranges that findExpressionChanged() checked for each node of an expression. The checks
+/// are per token, so calls with other start and end tokens reuse them.
+struct ExpressionChangedMemo {
+    struct Range {
+        const Token* first;
+        const Token* last;
+        // last is the first change in the range, otherwise no token of the range changes the node
+        bool changed;
+    };
+    // node -> the index of first -> the range
+    std::unordered_map<const Token*, std::map<nonneg int, Range>> ranges;
+};
+
+/// findExpressionChanged() with the default depth, remembering the checked ranges in memo
+CPPCHECKLIB const Token* findExpressionChanged(const Token* expr,
+                                               const Token* start,
+                                               const Token* end,
+                                               const Settings& settings,
+                                               ExpressionChangedMemo& memo);
 
 const Token* findExpressionChangedSkipDeadCode(const Token* expr,
                                                const Token* start,
