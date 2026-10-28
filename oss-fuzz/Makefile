@@ -345,7 +345,7 @@ $(libcppdir)/templatesimplifier.o: ../lib/templatesimplifier.cpp ../lib/checkers
 $(libcppdir)/timer.o: ../lib/timer.cpp ../lib/config.h ../lib/timer.h
 	$(CXX) ${LIB_FUZZING_ENGINE} $(CPPFLAGS) $(CXXFLAGS) -c -o $@ $(libcppdir)/timer.cpp
 
-$(libcppdir)/token.o: ../lib/token.cpp ../externals/simplecpp/simplecpp.h ../lib/astutils.h ../lib/checkers.h ../lib/config.h ../lib/errortypes.h ../lib/library.h ../lib/mathlib.h ../lib/platform.h ../lib/settings.h ../lib/smallvector.h ../lib/sourcelocation.h ../lib/standards.h ../lib/symboldatabase.h ../lib/templatesimplifier.h ../lib/token.h ../lib/tokenlist.h ../lib/tokenrange.h ../lib/utils.h ../lib/valueflow.h ../lib/vfvalue.h
+$(libcppdir)/token.o: ../lib/token.cpp ../externals/simplecpp/simplecpp.h ../lib/astutils.h ../lib/blockpool.h ../lib/checkers.h ../lib/config.h ../lib/errortypes.h ../lib/library.h ../lib/mathlib.h ../lib/platform.h ../lib/settings.h ../lib/smallvector.h ../lib/sourcelocation.h ../lib/standards.h ../lib/symboldatabase.h ../lib/templatesimplifier.h ../lib/token.h ../lib/tokenlist.h ../lib/tokenrange.h ../lib/utils.h ../lib/valueflow.h ../lib/vfvalue.h
 	$(CXX) ${LIB_FUZZING_ENGINE} $(CPPFLAGS) $(CXXFLAGS) -c -o $@ $(libcppdir)/token.cpp
 
 $(libcppdir)/tokenlist.o: ../lib/tokenlist.cpp ../externals/simplecpp/simplecpp.h ../lib/astutils.h ../lib/checkers.h ../lib/config.h ../lib/errorlogger.h ../lib/errortypes.h ../lib/keywords.h ../lib/library.h ../lib/mathlib.h ../lib/path.h ../lib/platform.h ../lib/settings.h ../lib/smallvector.h ../lib/standards.h ../lib/templatesimplifier.h ../lib/token.h ../lib/tokenlist.h ../lib/utils.h ../lib/vfvalue.h

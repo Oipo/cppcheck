@@ -300,6 +300,7 @@ TESTOBJ =     test/fixture.o \
               test/testassert.o \
               test/testastutils.o \
               test/testautovariables.o \
+              test/testblockpool.o \
               test/testbool.o \
               test/testbufferoverrun.o \
               test/testcharvar.o \
@@ -675,7 +676,7 @@ $(libcppdir)/templatesimplifier.o: lib/templatesimplifier.cpp lib/checkers.h lib
 $(libcppdir)/timer.o: lib/timer.cpp lib/config.h lib/timer.h
 	$(CXX) ${INCLUDE_FOR_LIB} $(CPPFLAGS) $(CXXFLAGS) -c -o $@ $(libcppdir)/timer.cpp
 
-$(libcppdir)/token.o: lib/token.cpp externals/simplecpp/simplecpp.h lib/astutils.h lib/checkers.h lib/config.h lib/errortypes.h lib/library.h lib/mathlib.h lib/platform.h lib/settings.h lib/smallvector.h lib/sourcelocation.h lib/standards.h lib/symboldatabase.h lib/templatesimplifier.h lib/token.h lib/tokenlist.h lib/tokenrange.h lib/utils.h lib/valueflow.h lib/vfvalue.h
+$(libcppdir)/token.o: lib/token.cpp externals/simplecpp/simplecpp.h lib/astutils.h lib/blockpool.h lib/checkers.h lib/config.h lib/errortypes.h lib/library.h lib/mathlib.h lib/platform.h lib/settings.h lib/smallvector.h lib/sourcelocation.h lib/standards.h lib/symboldatabase.h lib/templatesimplifier.h lib/token.h lib/tokenlist.h lib/tokenrange.h lib/utils.h lib/valueflow.h lib/vfvalue.h
 	$(CXX) ${INCLUDE_FOR_LIB} $(CPPFLAGS) $(CXXFLAGS) -c -o $@ $(libcppdir)/token.cpp
 
 $(libcppdir)/tokenlist.o: lib/tokenlist.cpp externals/simplecpp/simplecpp.h lib/astutils.h lib/checkers.h lib/config.h lib/errorlogger.h lib/errortypes.h lib/keywords.h lib/library.h lib/mathlib.h lib/path.h lib/platform.h lib/settings.h lib/smallvector.h lib/standards.h lib/templatesimplifier.h lib/token.h lib/tokenlist.h lib/utils.h lib/vfvalue.h
@@ -758,6 +759,9 @@ test/testastutils.o: test/testastutils.cpp lib/astutils.h lib/check.h lib/checke
 
 test/testautovariables.o: test/testautovariables.cpp lib/check.h lib/checkautovariables.h lib/checkers.h lib/checkimpl.h lib/color.h lib/config.h lib/errorlogger.h lib/errortypes.h lib/library.h lib/mathlib.h lib/path.h lib/platform.h lib/settings.h lib/standards.h lib/tokenize.h lib/tokenlist.h lib/utils.h test/fixture.h test/helpers.h
 	$(CXX) ${INCLUDE_FOR_TEST} ${CFLAGS_FOR_TEST} $(CPPFLAGS) $(CXXFLAGS) -c -o $@ test/testautovariables.cpp
+
+test/testblockpool.o: test/testblockpool.cpp lib/blockpool.h lib/check.h lib/checkers.h lib/color.h lib/config.h lib/errorlogger.h lib/errortypes.h lib/library.h lib/mathlib.h lib/platform.h lib/settings.h lib/standards.h lib/utils.h test/fixture.h
+	$(CXX) ${INCLUDE_FOR_TEST} ${CFLAGS_FOR_TEST} $(CPPFLAGS) $(CXXFLAGS) -c -o $@ test/testblockpool.cpp
 
 test/testbool.o: test/testbool.cpp lib/check.h lib/checkbool.h lib/checkers.h lib/checkimpl.h lib/color.h lib/config.h lib/errorlogger.h lib/errortypes.h lib/library.h lib/mathlib.h lib/path.h lib/platform.h lib/settings.h lib/standards.h lib/tokenize.h lib/tokenlist.h lib/utils.h test/fixture.h test/helpers.h
 	$(CXX) ${INCLUDE_FOR_TEST} ${CFLAGS_FOR_TEST} $(CPPFLAGS) $(CXXFLAGS) -c -o $@ test/testbool.cpp

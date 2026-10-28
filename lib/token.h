@@ -186,6 +186,9 @@ private:
         Impl() = default;
         ~Impl();
 
+        static void* operator new(std::size_t);
+        static void operator delete(void* p, std::size_t) noexcept;
+
         Impl(const Impl &) = delete;
         Impl operator=(const Impl &) = delete;
     };
@@ -214,6 +217,10 @@ public:
     // for usage in CheckIO::ArgumentInfo only
     explicit Token(const Token *tok);
     ~Token();
+
+    // the tokens and their Impl come from a BlockPool
+    static void* operator new(std::size_t size);
+    static void operator delete(void* p, std::size_t size) noexcept;
 
     ConstTokenRange until(const Token * t) const;
 

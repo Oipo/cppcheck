@@ -409,6 +409,9 @@
     <ClInclude Include="infer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="blockpool.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="analyzer.h">
       <Filter>Header Files</Filter>
     </ClInclude>

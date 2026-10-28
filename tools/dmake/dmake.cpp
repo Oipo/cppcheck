@@ -495,6 +495,7 @@ int main(int argc, char **argv)
         libfiles_h.emplace(fname + ".h");
     }
     libfiles_h.emplace("analyzer.h");
+    libfiles_h.emplace("blockpool.h");
     libfiles_h.emplace("calculate.h");
     libfiles_h.emplace("check.h");
     libfiles_h.emplace("config.h");

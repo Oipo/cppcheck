@@ -19,6 +19,7 @@
 #include "token.h"
 
 #include "astutils.h"
+#include "blockpool.h"
 #include "errortypes.h"
 #include "library.h"
 #include "mathlib.h"
@@ -79,6 +80,30 @@ Token::Token(const Token* tok)
 Token::~Token()
 {
     delete mImpl;
+}
+
+void* Token::operator new(std::size_t size)
+{
+    // a derived class can be larger
+    return size == sizeof(Token) ? BlockPool<Token>::allocate() : ::operator new(size);
+}
+
+void Token::operator delete(void* p, std::size_t size) noexcept
+{
+    if (size == sizeof(Token))
+        BlockPool<Token>::deallocate(p);
+    else
+        ::operator delete(p);
+}
+
+void* Token::Impl::operator new(std::size_t)
+{
+    return BlockPool<Impl>::allocate();
+}
+
+void Token::Impl::operator delete(void* p, std::size_t) noexcept
+{
+    BlockPool<Impl>::deallocate(p);
 }
 
 /*

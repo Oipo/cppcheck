@@ -110,6 +110,7 @@
     <ClInclude Include="analyzer.h" />
     <ClInclude Include="analyzerinfo.h" />
     <ClInclude Include="astutils.h" />
+    <ClInclude Include="blockpool.h" />
     <ClInclude Include="calculate.h" />
     <ClInclude Include="check.h" />
     <ClInclude Include="check64bit.h" />
