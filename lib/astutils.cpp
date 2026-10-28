@@ -1091,6 +1091,12 @@ bool isAliasOf(const Token* tok, const Token* expr, nonneg int* indirect)
     const Token* r = nullptr;
     for (const ReferenceToken& ref : tok->refs()) {
         const bool pointer = astIsPointer(ref.token);
+        // without a dereference of expr or a value that can alias, no node of expr is an alias
+        const bool deref = ref.token != tok && ref.token->isUnaryOp("*") && expr->exprId() == ref.token->astOperand1()->exprId();
+        if (!deref && std::none_of(ref.token->values().cbegin(), ref.token->values().cend(), [&](const ValueFlow::Value& val) {
+            return !val.isImpossible() && (val.isLocalLifetimeValue() || (pointer && val.isSymbolicValue() && val.intvalue == 0));
+        }))
+            continue;
         r = findAstNode(expr, [&](const Token* childTok) {
             if (childTok->exprId() == 0)
                 return false;
