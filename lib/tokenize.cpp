@@ -3963,6 +3963,7 @@ bool Tokenizer::simplifyTokens1(const std::string &configuration, int fileIndex)
     if (doValueFlow) {
         mSymbolDatabase->setArrayDimensionsUsingValueFlow();
     }
+    mSymbolDatabase->setValuesFinal();
 
     printDebugOutput(std::cout);
 

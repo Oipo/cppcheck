@@ -13826,6 +13826,22 @@ private:
             "[test.cpp:5:10]: (style) Variable 'yp' can be declared as pointer to const [constVariablePointer]\n",
             errout_str());
 
+        // x and y are the same before they are aliased, and not after
+        check("bool f() {\n"
+              "    int x = 0;\n"
+              "    int y = 0;\n"
+              "    bool b = x == y;\n"
+              "    int* xp = &x;\n"
+              "    int* yp = &y;\n"
+              "    return b || xp > yp;\n"
+              "}\n");
+        ASSERT_EQUALS(
+            "[test.cpp:2:13] -> [test.cpp:3:13] -> [test.cpp:4:16]: (style) The comparison 'x == y' is always true because 'x' and 'y' represent the same value. [knownConditionTrueFalse]\n"
+            "[test.cpp:2:9] -> [test.cpp:5:15] -> [test.cpp:3:9] -> [test.cpp:6:15] -> [test.cpp:7:20]: (error) Comparing pointers that point to different objects [comparePointers]\n"
+            "[test.cpp:5:10]: (style) Variable 'xp' can be declared as pointer to const [constVariablePointer]\n"
+            "[test.cpp:6:10]: (style) Variable 'yp' can be declared as pointer to const [constVariablePointer]\n",
+            errout_str());
+
         check("bool f() {\n"
               "    int x = 0;\n"
               "    int y = 1;\n"

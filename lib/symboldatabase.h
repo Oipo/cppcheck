@@ -1405,6 +1405,28 @@ public:
         return mVariableList;
     }
 
+    /** The values of the tokens do not change any more, so the checks can cache what they find in them */
+    void setValuesFinal() {
+        mValuesFinal = true;
+    }
+
+    /** How far the search for an alias of a variable got, see isAliased() in astutils.cpp */
+    struct AliasScan {
+        const Token* start;
+        /** The first token that was not looked at */
+        const Token* end;
+        const Token* alias;
+    };
+
+    /** The AliasScan of the variable, nullptr if the values can still change */
+    AliasScan* aliasScan(nonneg int varid) const {
+        if (!mValuesFinal || varid >= mVariableList.size())
+            return nullptr;
+        if (mAliasScans.empty())
+            mAliasScans.resize(mVariableList.size());
+        return &mAliasScans[varid];
+    }
+
     /**
      * @brief output a debug message
      */
@@ -1532,6 +1554,9 @@ private:
     ValueType::Sign mDefaultSignedness;
 
     mutable std::map<const Type*, bool> mIsRecordTypeWithoutSideEffectsMap;
+
+    bool mValuesFinal{};
+    mutable std::vector<AliasScan> mAliasScans;
 };
 
 

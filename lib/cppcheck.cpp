@@ -754,11 +754,13 @@ unsigned int CppCheck::checkClang(const FileWithDetails &file)
         Tokenizer tokenizer(std::move(tokenlist), mErrorLogger);
         std::istringstream ast(output2);
         clangimport::parseClangAstDump(tokenizer, ast);
+        auto& symbolDatabase = const_cast<SymbolDatabase&>(*tokenizer.getSymbolDatabase());
         ValueFlow::setValues(tokenizer.list,
-                             const_cast<SymbolDatabase&>(*tokenizer.getSymbolDatabase()),
+                             symbolDatabase,
                              mErrorLogger,
                              mSettings,
                              mTimerResults);
+        symbolDatabase.setValuesFinal();
         tokenizer.printDebugOutput(std::cout);
         checkNormalTokens(tokenizer, nullptr, ""); // TODO: provide analyzer information
 
