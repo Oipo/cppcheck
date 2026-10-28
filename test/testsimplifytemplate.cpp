@@ -336,6 +336,7 @@ private:
         TEST_CASE(templateSpecializationOfMemberTemplate);
         TEST_CASE(templateMemberWithoutTemplateHead);
         TEST_CASE(templateQualifiedMemberTemplate);
+        TEST_CASE(templateMemberInOtherBlock);
 
         TEST_CASE(dumpTemplateArgFrom);
     }
@@ -7318,6 +7319,20 @@ private:
                                "void a :: a :: foo<char> ( ) { }";
             ASSERT_EQUALS(exp, tok(code));
         }
+    }
+
+    void templateMemberInOtherBlock() {
+        // the member function is in another block than the class, it has the name of the class followed by '<'
+        const char code[] = "namespace N { template <class T> struct A { void f(); }; }\n"
+                            "namespace M { struct B { void g(); }; }\n"
+                            "namespace N { template <class T> void A<T>::f() {} }\n"
+                            "N::A<int> a;\n";
+        const char exp[] = "namespace N { struct A<int> ; } "
+                           "namespace M { struct B { void g ( ) ; } ; } "
+                           "N :: A<int> a ; "
+                           "struct N :: A<int> { void f ( ) ; } ; "
+                           "void N :: A<int> :: f ( ) { }";
+        ASSERT_EQUALS(exp, tok(code));
     }
 
     void dumpTemplateArgFrom() {

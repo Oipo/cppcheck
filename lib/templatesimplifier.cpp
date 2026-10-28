@@ -1782,6 +1782,18 @@ static bool isBlockWithoutTemplate(Token *tok)
     return templateInBlock(tok) == TemplateInBlock::No;
 }
 
+#ifndef NDEBUG
+// Is tok in the block that starts at the '{' block
+static bool isInBlock(const Token *tok, const Token *block)
+{
+    for (const Token *t = block; tok && t != block->link(); t = t->next()) {
+        if (t == tok)
+            return true;
+    }
+    return false;
+}
+#endif
+
 // The "template" of the next template head in a chain of template heads, or nullptr
 template<class T>
 static T *nextTemplateHead(T *head)
@@ -2113,6 +2125,20 @@ void TemplateSimplifier::expandTemplate(
         }
     }
 
+    // The blocks without "template" are skipped, and the blocks without the name of the template
+    // followed by '<' (an instantiation has the name of its declaration). A member function implemented
+    // outside of the class definition has it, and the blocks that contain the declaration or the added
+    // tokens (a forward declaration or a specialization) have it: it is the name of the template
+    // declaration at its "template <". When mTemplateBlockNamesKnown is false, the names of the
+    // forward declarations that were added before a "template" are missing in the blocks that contain
+    // them, but there is no "template" in them.
+    const std::uint64_t templateName = nameBit(templateDeclaration.name());
+    const auto isBlockToSkip = [&](Token *tok) {
+        if (isBlockWithoutTemplate(tok))
+            return true;
+        return tok->str() == "{" && tok->link() && (tok->blockNames() & templateName) == 0;
+    };
+
     std::vector<Token *> blocks; // the blocks that contain tok3
     for (Token *tok3 = mTokenList.front(); tok3; tok3 = tok3 ? tok3->next() : nullptr) {
         if (!blocks.empty() && tok3 == blocks.back()->link())
@@ -2124,7 +2150,8 @@ void TemplateSimplifier::expandTemplate(
 
         // Only the declaration and the member functions implemented outside of the class definition
         // (they are in a statement with "template") are of interest
-        if (isBlockWithoutTemplate(tok3)) {
+        if (isBlockToSkip(tok3)) {
+            assert(!isInBlock(templateDeclarationToken, tok3) && !isInBlock(addedEnd, tok3));
             tok3 = tok3->link();
             continue;
         }
