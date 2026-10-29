@@ -1142,11 +1142,12 @@ void CheckLeakAutoVarImpl::functionCall(const Token *tokName, const Token *tokOp
         } else {
             const Token* const nextArg = funcArg->nextArgument();
             while (arg && ((nextArg && arg != nextArg) || (!nextArg && arg != tokOpeningPar->link()))) {
-                checkTokenInsideExpression(arg, varInfo, /*inFuncCall*/ isLeakIgnore);
+                // the arguments of a function call in the argument are checked by functionCall()
+                const Token* const checkedEnd = checkTokenInsideExpression(arg, varInfo, /*inFuncCall*/ isLeakIgnore);
 
                 if (isLambdaCaptureList(arg))
                     break;
-                arg = arg->next();
+                arg = checkedEnd ? checkedEnd->next() : arg->next();
             }
         }
         // TODO: check each token in argument expression (could contain multiple variables)

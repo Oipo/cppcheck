@@ -118,6 +118,7 @@ private:
 
         // handling function calls
         TEST_CASE(functioncall1);
+        TEST_CASE(functioncall2); // nested function calls
 
         // goto
         TEST_CASE(goto1);
@@ -1908,6 +1909,37 @@ private:
               "    std::string str = std::string(b);\n"
               "}\n", dinit(CheckOptions, $.cpp = true));
         ASSERT_EQUALS("[test.cpp:4:1]: (error) Memory leak: b [memleak]\n", errout_str());
+    }
+
+    void functioncall2() {
+        // the arguments of a function call in an argument are checked once, not again for every
+        // enclosing call (which took twice as long for every level)
+        check("struct S {};\n"
+              "S f(S, S);\n"
+              "void h(S);\n"
+              "void g(S x, S y) {\n"
+              "    h(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(x, y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y), y));\n"
+              "}\n", dinit(CheckOptions, $.cpp = true));
+        ASSERT_EQUALS("", errout_str());
+
+        check("int g(int, int);\n"
+              "int h(int, int);\n"
+              "void f(void) {\n"
+              "    char *p = malloc(10);\n"
+              "    free(p);\n"
+              "    g(h(*p, 1), 2);\n"
+              "}\n");
+        ASSERT_EQUALS("[test.c:6:10]: (error) Dereferencing 'p' after it is deallocated / released [deallocuse]\n", errout_str());
+
+        // free(p) in a call in an argument is not seen twice
+        check("int g(int, int);\n"
+              "int h(int, int);\n"
+              "void f(void) {\n"
+              "    char *p = malloc(10);\n"
+              "    g(h(free(p), 2), 3);\n"
+              "    free(p);\n"
+              "}\n");
+        ASSERT_EQUALS("[test.c:5:9] -> [test.c:6:5]: (error) Memory pointed to by 'p' is freed twice. [doubleFree]\n", errout_str());
     }
 
     void goto1() {
