@@ -228,6 +228,7 @@ private:
         TEST_CASE(template184);
         TEST_CASE(template185);
         TEST_CASE(template186);
+        TEST_CASE(template187);
         TEST_CASE(template_specialization_1);  // #7868 - template specialization template <typename T> struct S<C<T>> {..};
         TEST_CASE(template_specialization_2);  // #7868 - template specialization template <typename T> struct S<C<T>> {..};
         TEST_CASE(template_specialization_3);
@@ -4735,6 +4736,18 @@ private:
                            "void g ( ) { f<char> ( ) ; } "
                            "void f<char> ( ) { conditional<(1<sizeof(X)),int,long> :: type u ; u = 0 ; } "
                            "struct conditional<(1<sizeof(X)),int,long> { } ;";
+        ASSERT_EQUALS(exp, tok(code));
+    }
+
+    void template187() {
+        // the end of an outermost block is followed by '<' (the summary of the blocks read outside of its vector)
+        const char code[] = "template <class T> struct S { T t; };\n"
+                            "struct A {};\n"
+                            "bool operator<(A, A);\n"
+                            "bool b = A{} < A{};\n"
+                            "S<int> s;\n";
+        const char exp[] = "struct S<int> ; struct A { } ; bool operator< ( A , A ) ; bool b ; b = A { } < A { } ; "
+                           "S<int> s ; struct S<int> { int t ; } ;";
         ASSERT_EQUALS(exp, tok(code));
     }
 

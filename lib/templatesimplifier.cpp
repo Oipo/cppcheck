@@ -1786,10 +1786,11 @@ static void forEachBlockSummary(T *start, const Token *end, const F &f)
             const Block block = blocks.back();
             blocks.pop_back();
             f(block.start, block.hasTemplate, block.names);
-            if (!blocks.empty()) {
-                blocks.back().hasTemplate |= block.hasTemplate;
-                blocks.back().names |= block.names;
-            }
+            // the end of an outermost block, "A {} < b" is not in a block
+            if (blocks.empty())
+                continue;
+            blocks.back().hasTemplate |= block.hasTemplate;
+            blocks.back().names |= block.names;
         } else if (tok->str() == "template") {
             blocks.back().hasTemplate = true;
         }
