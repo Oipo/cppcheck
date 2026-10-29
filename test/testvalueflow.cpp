@@ -8728,6 +8728,21 @@ private:
                "    OpNew *newp = &operator new;\n"
                "}\n";
         (void)valueOfTok(code, "&");
+
+        // isAliasOf() without the expression, for a reference that is a dereference
+        code = "struct M {\n"
+               "    double none;\n"
+               "    int f(const double* const alphap, int n) const {\n"
+               "        const double alpha = alphap ? *alphap : none;\n"
+               "        int r = 0;\n"
+               "        for (int i = 0; i < n; ++i) {\n"
+               "            if (alpha != 0)\n"
+               "                r++;\n"
+               "        }\n"
+               "        return r;\n"
+               "    }\n"
+               "};\n";
+        (void)valueOfTok(code, "alpha");
     }
 
     void valueFlowHang() {

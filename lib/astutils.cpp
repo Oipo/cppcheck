@@ -1086,7 +1086,7 @@ bool isAliasOf(const Token* tok, const Token* expr, nonneg int* indirect)
 {
     if (indirect)
         *indirect = 1;
-    if (!tok)
+    if (!tok || !expr)
         return false;
     const Token* r = nullptr;
     for (const ReferenceToken& ref : tok->refs()) {
