@@ -62,10 +62,19 @@ const std::set<std::string> ErrorLogger::mCriticalErrorIds{
     "unknownMacro"
 };
 
-static std::size_t sdbm(const std::string& hashString) {
-    return std::accumulate(hashString.cbegin(), hashString.cend(), std::size_t{0}, [](std::size_t h, unsigned char c) {
-        return static_cast<std::size_t>(c) + (h << 6) + (h << 16) - h;
+static std::size_t sdbm(std::size_t h, unsigned char c) {
+    return static_cast<std::size_t>(c) + (h << 6) + (h << 16) - h;
+}
+
+// the hash of a string that follows the string with hash h
+static std::size_t sdbm(std::size_t h, const std::string& hashString) {
+    return std::accumulate(hashString.cbegin(), hashString.cend(), h, [](std::size_t h2, unsigned char c) {
+        return sdbm(h2, c);
     });
+}
+
+static std::size_t sdbm(const std::string& hashString) {
+    return sdbm(0, hashString);
 }
 
 ErrorMessage::ErrorMessage()
@@ -276,7 +285,15 @@ void ErrorMessage::calculateWarningHash(const std::list<const Token*>& callstack
     if (callstack.empty())
         return;
     // Calculate a hash for this warning message
-    std::string hashString;
+    // hash algorithm: sdbm
+    // any hash algorithm can be used but it has to be the same hash on different platforms and compilers
+    // The hashed string is id + '\n' + mShortMessage + '\n' and " " + str() for each token. The
+    // tokens are added to the hash one by one, the string of a whole function is not built for every
+    // warning in it.
+    std::size_t h = sdbm(sdbm(sdbm(sdbm(id), '\n'), mShortMessage), '\n');
+    const auto addToken = [&h](const Token* t) {
+        h = sdbm(sdbm(h, ' '), t->str());
+    };
     for (const Token* tok: callstack) {
         if (!tok)
             continue;
@@ -288,12 +305,12 @@ void ErrorMessage::calculateWarningHash(const std::list<const Token*>& callstack
             for (const Token* t = tok; t; t = t->previous()) {
                 if (!t->scope()->isExecutable())
                     break;
-                hashString += " " + t->str();
+                addToken(t);
             }
             for (const Token* t = tok->next(); t; t = t->next()) {
                 if (!t->scope()->isExecutable())
                     break;
-                hashString += " " + t->str();
+                addToken(t);
             }
         } else {
             // Non executable scope => include tokens in current statement => if the current statement is changed the hash is changed
@@ -302,10 +319,10 @@ void ErrorMessage::calculateWarningHash(const std::list<const Token*>& callstack
                     break;
                 if (t->scope() != tok->scope()) // stop on {} unless its an initializer
                     break;
-                hashString += " " + t->str();
+                addToken(t);
             }
             for (const Token* t = tok->next(); t; t = t->next()) {
-                hashString += " " + t->str();
+                addToken(t);
                 if (t->str() == ";")
                     break;
                 if (t->scope() != tok->scope()) // stop on {} unless its an initializer
@@ -314,11 +331,7 @@ void ErrorMessage::calculateWarningHash(const std::list<const Token*>& callstack
         }
     }
 
-    hashString = id + '\n' + mShortMessage + '\n' + hashString;
-
-    // hash algorithm: sdbm
-    // any hash algorithm can be used but it has to be the same hash on different platforms and compilers
-    hash = sdbm(hashString);
+    hash = h;
 }
 
 void ErrorMessage::calculateWarningHashFromLocations()
