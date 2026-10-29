@@ -1835,6 +1835,17 @@ private:
         // a type alias in a namespace hides a type alias at global scope when the namespace is opened again
         const char code12[] = "using T = int; namespace M { using T = float; } namespace M { T y; } T z;\n";
         ASSERT_EQUALS("namespace M { float y ; } int z ;", tok(code12));
+
+        // a type alias in a class does not hide the type alias of an inner class
+        const char code13[] = "struct C { using T = int; T a; struct D; void f(); };\n"
+                              "struct C::D { using T = short; T b; };\n"
+                              "void C::f() { T c; }\n";
+        ASSERT_EQUALS("struct C { int a ; struct D ; void f ( ) ; } ; struct C :: D { short b ; } ; void C :: f ( ) { int c ; }",
+                      tok(code13));
+
+        // a type alias in a namespace does not hide the type alias of an inner namespace
+        const char code14[] = "namespace M { using T = int; namespace N { using T = short; T b; } T a; }\n";
+        ASSERT_EQUALS("namespace M { namespace N { short b ; } int a ; }", tok(code14));
     }
 
     void simplifyUsingBaseClassInMemberFunction() {

@@ -3420,9 +3420,13 @@ bool Tokenizer::simplifyUsing()
             }
             return true;
         };
-        const auto isInHidingScope = [&hidingScopes](const std::string &s) {
-            return std::any_of(hidingScopes.cbegin(), hidingScopes.cend(), [&s](const std::string &h) {
-                return s == h || (s.size() > h.size() + 4 && s.compare(0, h.size(), h) == 0 && s.compare(h.size(), 4, " :: ") == 0);
+        // is the scope s inside the scope outer
+        const auto isInnerScope = [](const std::string &s, const std::string &outer) {
+            return outer.empty() || (s.size() > outer.size() + 4 && s.compare(0, outer.size(), outer) == 0 && s.compare(outer.size(), 4, " :: ") == 0);
+        };
+        const auto isInHidingScope = [&](const std::string &s) {
+            return std::any_of(hidingScopes.cbegin(), hidingScopes.cend(), [&](const std::string &h) {
+                return s == h || isInnerScope(s, h);
             });
         };
 
@@ -3569,7 +3573,8 @@ bool Tokenizer::simplifyUsing()
                 // it is hidden up to the end of the block.
                 if (tok1->strAt(-1) == "using" && currentScope1->parent && currentScope1->bodyEnd) {
                     if (isNamedScope(currentScope1)) {
-                        if (currentScope1->fullName != scope)
+                        // a type alias of an outer scope does not hide this one
+                        if (isInnerScope(currentScope1->fullName, scope))
                             hidingScopes.insert(currentScope1->fullName);
                     } else if (!hiddenEnd)
                         hiddenEnd = currentScope1->bodyEnd;
