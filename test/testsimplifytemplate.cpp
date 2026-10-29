@@ -227,6 +227,7 @@ private:
         TEST_CASE(template183);
         TEST_CASE(template184);
         TEST_CASE(template185);
+        TEST_CASE(template186);
         TEST_CASE(template_specialization_1);  // #7868 - template specialization template <typename T> struct S<C<T>> {..};
         TEST_CASE(template_specialization_2);  // #7868 - template specialization template <typename T> struct S<C<T>> {..};
         TEST_CASE(template_specialization_3);
@@ -4717,6 +4718,24 @@ private:
                            "void Test :: g<int> ( std :: vector < int > v ) { }";
         ASSERT_EQUALS(exp, tok(code, dinit(CheckOptions, $.debugwarnings = true)));
         ASSERT_EQUALS("", errout_str());
+    }
+
+    void template186() {
+        // the arguments of an instantiation in the copy are simplified after the blocks of the copy are summarized
+        const char code[] = "template <bool B, class T, class F> struct conditional { typedef T type; };\n"
+                            "struct X {};\n"
+                            "template <class T> void f() {\n"
+                            "    typedef typename conditional<(sizeof(T) < sizeof(X)), int, long>::type U;\n"
+                            "    U u = 0;\n"
+                            "}\n"
+                            "void g() { f<char>(); }\n";
+        const char exp[] = "struct conditional<(1<sizeof(X)),int,long> ; "
+                           "struct X { } ; "
+                           "void f<char> ( ) ; "
+                           "void g ( ) { f<char> ( ) ; } "
+                           "void f<char> ( ) { conditional<(1<sizeof(X)),int,long> :: type u ; u = 0 ; } "
+                           "struct conditional<(1<sizeof(X)),int,long> { } ;";
+        ASSERT_EQUALS(exp, tok(code));
     }
 
     void template_specialization_1() {  // #7868 - template specialization template <typename T> struct S<C<T>> {..};

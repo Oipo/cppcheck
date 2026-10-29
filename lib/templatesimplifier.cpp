@@ -1930,6 +1930,8 @@ void TemplateSimplifier::expandTemplate(
     std::vector<ChangedTokens> changedTokens;
     const Token *addedStart = nullptr; // the tokens that are added before a "template"
     const Token *addedEnd = nullptr;
+    // the copy is added at the end of the token list, after this token
+    Token * const lastBeforeCopy = mTokenList.back();
 
     for (const Token* tok = templateInstantiation.token()->next()->findClosingBracket();
          tok && tok != templateInstantiation.token(); tok = tok->previous()) {
@@ -2662,6 +2664,10 @@ void TemplateSimplifier::expandTemplate(
             mTemplateInstantiations.emplace_back(inst.token, inst.scope);
     }
 
+    // the blocks of the copy are summarized when they are passed above, before their arguments
+    // are simplified, "sizeof ( char ) <" becomes "1 <"
+    if (copy && lastBeforeCopy != mTokenList.back())
+        summarizeBlocks(lastBeforeCopy->next(), nullptr);
     for (const ChangedTokens &changed : changedTokens)
         addNamesToBlocks(changed.start, changed.end, changed.blocks);
     // the blocks that contain the added tokens are not known
