@@ -3654,6 +3654,9 @@ bool Tokenizer::simplifyUsing()
                 } while (Token::Match(type, "%type% ::"));
                 if (Token::Match(type, "%type%"))
                     type = type->next();
+            } else if (Token::simpleMatch(type, "decltype (")) {
+                // the parentheses are not the parameters of a function type
+                type = type->linkAt(1)->next();
             } else if (Token::Match(type, "%type%")) {
                 while (Token::Match(type, "const|class|struct|union|enum %type%") ||
                        (type->next() && type->next()->isStandardType()))

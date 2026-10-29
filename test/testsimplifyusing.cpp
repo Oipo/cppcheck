@@ -107,6 +107,7 @@ private:
         TEST_CASE(simplifyUsingBaseClassInMemberFunction);
         TEST_CASE(simplifyUsingShadowedByVariable);
         TEST_CASE(simplifyUsingMemberFunctionScope);
+        TEST_CASE(simplifyUsingDecltype);
 
         TEST_CASE(scopeInfo1);
         TEST_CASE(scopeInfo2);
@@ -1922,6 +1923,17 @@ private:
         ASSERT_EQUALS("struct B { } ; void C :: f ( X a ) { } struct C : B { void g ( int ) ; } ; void C :: g ( int b ) { }",
                       tok(code));
         ASSERT_EQUALS("[test.cpp:2:9]: (debug) Executable scope 'f' with unknown function. [symbolDatabaseWarning]\n", errout_str());
+    }
+
+    void simplifyUsingDecltype() {
+        const char code[] = "void f() {\n"
+                            "    int x = 0;\n"
+                            "    using T = decltype(x);\n"
+                            "    T *a;\n"
+                            "    T b;\n"
+                            "}\n";
+        ASSERT_EQUALS("void f ( ) { int x ; x = 0 ; decltype ( x ) * a ; decltype ( x ) b ; }", tok(code));
+        ASSERT_EQUALS("", errout_str());
     }
 
     void scopeInfo1() {
