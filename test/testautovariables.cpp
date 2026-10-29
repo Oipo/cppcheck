@@ -4119,6 +4119,25 @@ private:
             "[test.cpp:3:32] -> [test.cpp:3:32] -> [test.cpp:2:9] -> [test.cpp:4:12]: (error) Returning object that points to local variable 'i' that will be invalid when returning. [returnDanglingLifetime]\n",
             errout_str());
 
+        // the lifetimes of the arguments are forwarded at the end of the list
+        check("std::vector<int*> f() {\n"
+              "    int i = 0;\n"
+              "    std::vector<int*> v = {&i, nullptr};\n"
+              "    return v;\n"
+              "}\n");
+        ASSERT_EQUALS(
+            "[test.cpp:3:28] -> [test.cpp:3:28] -> [test.cpp:2:9] -> [test.cpp:4:12]: (error) Returning object that points to local variable 'i' that will be invalid when returning. [returnDanglingLifetime]\n",
+            errout_str());
+
+        check("std::vector<int*> f(int* p) {\n"
+              "    int i = 0;\n"
+              "    std::vector<int*> v = {p, &i, p};\n"
+              "    return v;\n"
+              "}\n");
+        ASSERT_EQUALS(
+            "[test.cpp:3:31] -> [test.cpp:3:31] -> [test.cpp:2:9] -> [test.cpp:4:12]: (error) Returning object that points to local variable 'i' that will be invalid when returning. [returnDanglingLifetime]\n",
+            errout_str());
+
         check("std::vector<int*> f() {\n"
               "    int i = 0;\n"
               "    std::vector<int*> v{&i, &i};\n"

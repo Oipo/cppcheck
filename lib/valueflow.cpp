@@ -2925,7 +2925,27 @@ static bool isContainerOfPointers(const Token* tok, const Settings& settings)
 
 static void valueFlowLifetime(TokenList &tokenlist, ErrorLogger &errorLogger, const Settings &settings)
 {
+    // An argument of an initializer list forwards the lifetimes of all the arguments of the list,
+    // so they are forwarded once at the end of the list, not again for every argument.
+    std::unordered_map<const Token*, Token*> initListForwards;
+    const auto forwardLifetime = [&](Token* argTok) {
+        const Token* parent = argTok->astParent();
+        while (parent && parent->str() == ",")
+            parent = parent->astParent();
+        if (Token::simpleMatch(parent, "{") && !isScopeBracket(parent) && precedes(argTok, parent->link()))
+            initListForwards.emplace(parent, argTok);
+        else
+            valueFlowForwardLifetime(argTok, tokenlist, errorLogger, settings);
+    };
     for (Token *tok = tokenlist.front(); tok; tok = tok->next()) {
+        if (tok->str() == "}") {
+            const auto it = initListForwards.find(tok->link());
+            if (it != initListForwards.end()) {
+                Token* const argTok = it->second;
+                initListForwards.erase(it);
+                valueFlowForwardLifetime(argTok, tokenlist, errorLogger, settings);
+            }
+        }
         if (!tok->scope())
             continue;
         if (tok->scope()->type == ScopeType::eGlobal)
@@ -3039,7 +3059,7 @@ static void valueFlowLifetime(TokenList &tokenlist, ErrorLogger &errorLogger, co
                 }
             }
             if (update)
-                valueFlowForwardLifetime(tok, tokenlist, errorLogger, settings);
+                forwardLifetime(tok);
         }
         // address of
         else if (tok->isUnaryOp("&")) {
@@ -3069,7 +3089,7 @@ static void valueFlowLifetime(TokenList &tokenlist, ErrorLogger &errorLogger, co
                 value.setInconclusive(lt.inconclusive);
                 setTokenValue(tok, std::move(value), settings);
 
-                valueFlowForwardLifetime(tok, tokenlist, errorLogger, settings);
+                forwardLifetime(tok);
             }
         }
         // Converting to container view
@@ -3077,7 +3097,7 @@ static void valueFlowLifetime(TokenList &tokenlist, ErrorLogger &errorLogger, co
             LifetimeStore ls =
                 LifetimeStore{tok, "Converted to container view", ValueFlow::Value::LifetimeKind::SubObject};
             ls.byRef(tok, tokenlist, errorLogger, settings);
-            valueFlowForwardLifetime(tok, tokenlist, errorLogger, settings);
+            forwardLifetime(tok);
         }
         // container lifetimes
         else if (astIsContainer(tok)) {
@@ -3156,7 +3176,7 @@ static void valueFlowLifetime(TokenList &tokenlist, ErrorLogger &errorLogger, co
                     }
                 }
             }
-            valueFlowForwardLifetime(parent->tokAt(2), tokenlist, errorLogger, settings);
+            forwardLifetime(parent->tokAt(2));
         }
         // Check constructors
         else if (Token::Match(tok, "=|return|%name%|{|,|> {") && !isScope(tok->next())) {
@@ -3177,7 +3197,7 @@ static void valueFlowLifetime(TokenList &tokenlist, ErrorLogger &errorLogger, co
             value.tokvalue = tok;
             value.errorPath = std::move(errorPath);
             setTokenValue(ptok, std::move(value), settings);
-            valueFlowForwardLifetime(ptok, tokenlist, errorLogger, settings);
+            forwardLifetime(ptok);
         }
         // Check variables
         else if (tok->variable()) {
@@ -3197,12 +3217,12 @@ static void valueFlowLifetime(TokenList &tokenlist, ErrorLogger &errorLogger, co
                 value.errorPath = std::move(errorPath);
                 setTokenValue(tok, std::move(value), settings);
 
-                valueFlowForwardLifetime(tok, tokenlist, errorLogger, settings);
+                forwardLifetime(tok);
             }
         }
         // Forward any lifetimes
         else if (std::any_of(tok->values().cbegin(), tok->values().cend(), std::mem_fn(&ValueFlow::Value::isLifetimeValue))) {
-            valueFlowForwardLifetime(tok, tokenlist, errorLogger, settings);
+            forwardLifetime(tok);
         }
     }
 }
