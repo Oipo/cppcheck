@@ -28,7 +28,6 @@
 #include <map>
 #include <memory>
 #include <string>
-#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -163,18 +162,25 @@ private:
 
 struct ProgramMemoryState {
     struct ChangedKeyHash {
-        std::size_t operator()(const std::tuple<const Token*, const Token*, const Token*>& t) const
+        std::size_t operator()(const std::pair<const Token*, const Token*>& t) const
         {
             const std::hash<const Token*> h;
-            std::size_t seed = h(std::get<0>(t));
-            seed ^= h(std::get<1>(t)) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-            seed ^= h(std::get<2>(t)) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            std::size_t seed = h(t.first);
+            seed ^= h(t.second) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
             return seed;
         }
     };
-    using ChangedCache =
-        std::unordered_map<std::tuple<const Token*, const Token*, const Token*>, const Token*, ChangedKeyHash>;
-    // The token modifying expr between start and end, or nullptr.
+    // What is known about the changes of expr after start
+    struct ChangedRange {
+        // expr is not changed in [start, unchangedEnd)
+        const Token* unchangedEnd{};
+        // expr is changed by changedTok in [start, changedEnd)
+        const Token* changedEnd{};
+        const Token* changedTok{};
+    };
+    using ChangedCache = std::unordered_map<std::pair<const Token*, const Token*>, ChangedRange, ChangedKeyHash>;
+    // A token modifying expr between start and end (not always the one findExpressionChanged()
+    // returns), or nullptr.
     using FindChangedFn = std::function<const Token*(const Token* expr, const Token* start, const Token* end)>;
 
     ProgramMemory state;

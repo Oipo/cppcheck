@@ -594,11 +594,25 @@ ProgramMemoryState::FindChangedFn ProgramMemoryState::getCachedFindExpressionCha
     return [cache, sp, snapshot, skipDeadCode, evalCache](const Token* expr,
                                                           const Token* start,
                                                           const Token* end) -> const Token* {
-        const auto key = std::make_tuple(expr, start, end);
-        const auto it = cache->find(key);
-        const Token* modified = (it != cache->end())
-                                    ? it->second
-                                    : cache->emplace(key, findExpressionChanged(expr, start, end, *sp)).first->second;
+        if (!precedes(start, end))
+            return nullptr;
+        // Every token is checked on its own, so only the tokens after the range that is known to
+        // be unchanged are checked; the ends move forward during the analysis.
+        ChangedRange& range = (*cache)[std::make_pair(expr, start)];
+        if (!range.unchangedEnd)
+            range.unchangedEnd = start;
+        const Token* modified = nullptr;
+        if (range.changedTok && !precedes(end, range.changedEnd)) {
+            modified = range.changedTok;
+        } else if (precedes(range.unchangedEnd, end)) {
+            modified = findExpressionChanged(expr, range.unchangedEnd, end, *sp);
+            if (modified) {
+                range.changedEnd = end;
+                range.changedTok = modified;
+            } else {
+                range.unchangedEnd = end;
+            }
+        }
         if (!skipDeadCode || !modified)
             return modified;
         auto eval = [&](const Token* cond) -> std::vector<MathLib::bigint> {
