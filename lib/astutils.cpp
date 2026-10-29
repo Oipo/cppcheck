@@ -37,13 +37,11 @@
 #include "checkclass.h"
 
 #include <algorithm>
-#include <cassert>
 #include <cstring>
 #include <functional>
 #include <initializer_list>
 #include <iterator>
 #include <list>
-#include <map>
 #include <set>
 #include <type_traits>
 #include <unordered_map>
@@ -3119,7 +3117,7 @@ static const Token* findExpressionChangedImpl(const Token* expr,
         }
 
         if (tok->exprId() > 0 || global) {
-            const Token* modifedTok = find(tok, start, end, [&](const Token* tok2) {
+            const Token* modifedTok = find(start, end, [&](const Token* tok2) {
                 int indirect = 0;
                 if (const ValueType* vt = tok->valueType()) {
                     indirect = vt->pointer;
@@ -3147,51 +3145,9 @@ static const Token* findExpressionChangedImpl(const Token* expr,
 namespace {
     struct ExpressionChangedSimpleFind {
         template<class F>
-        const Token* operator()(const Token* /*node*/, const Token* start, const Token* end, F f) const
+        const Token* operator()(const Token* start, const Token* end, F f) const
         {
             return findToken(start, end, f);
-        }
-    };
-
-    struct ExpressionChangedMemoFind {
-        ExpressionChangedMemo* memo;
-        template<class F>
-        const Token* operator()(const Token* node, const Token* start, const Token* end, F f) const
-        {
-            std::map<nonneg int, ExpressionChangedMemo::Range>& ranges = memo->ranges[node];
-            const Token* tok = start;
-            while (precedes(tok, end)) {
-                const auto next = ranges.upper_bound(tok->index());
-                if (next != ranges.begin()) {
-                    const auto prev = std::prev(next);
-                    if (tok->index() <= prev->second.last->index()) {
-                        if (prev->second.changed)
-                            return precedes(prev->second.last, end) ? prev->second.last : nullptr;
-                        tok = prev->second.last->next();
-                        continue;
-                    }
-                }
-                // check up to the next checked range
-                const Token* const stop = (next != ranges.end() && precedes(next->second.first, end)) ? next->second.first : end;
-                const Token* last = nullptr;
-                bool changed = false;
-                for (const Token* tok2 = tok; tok2 != stop; tok2 = tok2->next()) {
-                    last = tok2;
-                    if (f(tok2)) {
-                        changed = true;
-                        break;
-                    }
-                }
-                // the ranges are not merged, that saved only 0.25% of the instructions
-                const auto range = ranges.emplace_hint(next, tok->index(), ExpressionChangedMemo::Range{tok, last, changed});
-                assert(range == ranges.begin() || std::prev(range)->second.last->index() < tok->index());
-                assert(next == ranges.end() || last->index() < next->second.first->index());
-                (void)range;
-                if (changed)
-                    return last;
-                tok = last->next();
-            }
-            return nullptr;
         }
     };
 
@@ -3203,7 +3159,7 @@ namespace {
             : library(library), evaluate(&evaluate)
         {}
         template<class F>
-        const Token* operator()(const Token* /*node*/, const Token* start, const Token* end, F f) const
+        const Token* operator()(const Token* start, const Token* end, F f) const
         {
             return findTokenSkipDeadCode(library, start, end, std::move(f), *evaluate);
         }
@@ -3217,15 +3173,6 @@ const Token* findExpressionChanged(const Token* expr,
                                    int depth)
 {
     return findExpressionChangedImpl(expr, start, end, settings, depth, ExpressionChangedSimpleFind{});
-}
-
-const Token* findExpressionChanged(const Token* expr,
-                                   const Token* start,
-                                   const Token* end,
-                                   const Settings& settings,
-                                   ExpressionChangedMemo& memo)
-{
-    return findExpressionChangedImpl(expr, start, end, settings, 20, ExpressionChangedMemoFind{&memo});
 }
 
 const Token* findExpressionChangedSkipDeadCode(const Token* expr,
