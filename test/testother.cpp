@@ -11397,6 +11397,58 @@ private:
               "}\n");
         ASSERT_EQUALS("", errout_str());
 
+        // the code after a loop that is left with break is checked once, not again for every
+        // loop before it (which took twice as long for every loop)
+        check("void g();\n"
+              "int f() {\n"
+              "    int x;\n"
+              "    x = 1;\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    do { g(); break; } while (0);\n"
+              "    x = 2;\n"
+              "    return x;\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:4:7] -> [test.cpp:35:7]: (style) Variable 'x' is reassigned a value before the old one has been used. [redundantAssignment]\n", errout_str());
+
+        // the condition of a do-while loop that is left with break is checked
+        check("void g();\n"
+              "int f() {\n"
+              "    int x;\n"
+              "    x = 1;\n"
+              "    do { g(); break; } while (x);\n"
+              "    x = 2;\n"
+              "    return x;\n"
+              "}\n");
+        ASSERT_EQUALS("", errout_str());
+
         check("void foo(int num) {\n" // #9420 FP
               "  int a = num;\n"
               "  for (int b = 0; b < num; a = b++)\n"

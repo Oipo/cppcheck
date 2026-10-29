@@ -318,6 +318,15 @@ FwdAnalysis::Result FwdAnalysis::checkRecursive(const Token *expr, const Token *
                     const Result &result2 = checkRecursive(expr, scopeEndToken->next(), endToken, exprVarIds, local, inInnerClass, depth);
                     if (result2.type == Result::Type::BAILOUT)
                         return result2;
+                    // result2 is the result of the rest of this scope after the loop, do not check it again
+                    const Token *loopEnd = tok->linkAt(1);
+                    if (scopeEndToken == loopEnd)
+                        return result2;
+                    if (tok->str() == "do" && Token::simpleMatch(loopEnd, "} while (") && scopeEndToken == loopEnd->linkAt(2)->next()) {
+                        // only the condition of the do-while loop is not checked yet
+                        const Result &conditionResult = checkRecursive(expr, loopEnd->next(), scopeEndToken->next(), exprVarIds, local, inInnerClass, depth);
+                        return conditionResult.type == Result::Type::NONE ? result2 : conditionResult;
+                    }
                 }
             }
             if (Token::simpleMatch(tok->linkAt(1), "} else {")) {
