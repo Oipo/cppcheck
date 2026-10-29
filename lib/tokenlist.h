@@ -32,6 +32,7 @@
 
 class Token;
 class Settings;
+class WarningHashCache;
 
 namespace simplecpp {
     class TokenList;
@@ -215,6 +216,14 @@ public:
         return mSettings;
     }
 
+    /** The cache of the warning hashes, set while the tokens do not change */
+    WarningHashCache* getWarningHashCache() const {
+        return mWarningHashCache;
+    }
+    void setWarningHashCache(WarningHashCache* cache) const {
+        mWarningHashCache = cache;
+    }
+
 private:
     bool createTokensFromBufferInternal(const char* data, std::size_t size, const std::string& file0);
 
@@ -232,6 +241,9 @@ private:
 
     /** File is known to be C/C++ code */
     Standards::Language mLang{Standards::Language::None};
+
+    /** The cache of the warning hashes during the checks */
+    mutable WarningHashCache* mWarningHashCache{};
 };
 
 /// @}

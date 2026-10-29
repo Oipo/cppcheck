@@ -24,9 +24,11 @@
 #include "helpers.h"
 #include "suppressions.h"
 
+#include <cstddef>
 #include <list>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "xml.h"
 
@@ -50,6 +52,7 @@ private:
         TEST_CASE(ErrorMessageConstruct);
         TEST_CASE(ErrorMessageConstructLocations);
         TEST_CASE(ErrorMessageHashFallback);
+        TEST_CASE(ErrorMessageHashCache);
         TEST_CASE(ErrorMessageVerbose);
         TEST_CASE(ErrorMessageVerboseLocations);
         TEST_CASE(ErrorMessageVerboseSymbol);
@@ -337,6 +340,31 @@ private:
             std::list<ErrorMessage::FileLocation> locs(1, fooCpp5);
             ErrorMessage msg(std::move(locs), "", Severity::style, "Some warning.", "unusedFunction", Certainty::normal);
             ASSERT(msg.toXML().find(" hash=\"") != std::string::npos);
+        }
+    }
+
+    // the cache of the warning hashes during the checks gives the same hashes
+    void ErrorMessageHashCache() {
+        SimpleTokenizer tokenizer(*this);
+        ASSERT(tokenizer.tokenize("int g;\n"
+                                  "void f(int x) {\n"
+                                  "    if (x) { g = x; }\n"
+                                  "    struct S { int m; };\n" // not executable, between executable tokens
+                                  "    auto l = [](int y) { return y + 1; };\n"
+                                  "    g = l(1);\n"
+                                  "}\n"
+                                  "int h() { return g; }\n"));
+        std::vector<std::size_t> hashes;
+        for (const Token* tok = tokenizer.tokens(); tok; tok = tok->next()) {
+            const ErrorMessage msg({tok, tokenizer.tokens()->tokAt(8)}, &tokenizer.list, Severity::style, "id", "Some warning.", Certainty::normal);
+            hashes.push_back(msg.hash);
+        }
+        const WarningHashCache cache(tokenizer.list);
+        ASSERT(tokenizer.list.getWarningHashCache() == &cache);
+        std::size_t i = 0;
+        for (const Token* tok = tokenizer.tokens(); tok; tok = tok->next(), ++i) {
+            const ErrorMessage msg({tok, tokenizer.tokens()->tokAt(8)}, &tokenizer.list, Severity::style, "id", "Some warning.", Certainty::normal);
+            ASSERT_EQUALS(hashes[i], msg.hash);
         }
     }
 

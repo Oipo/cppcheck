@@ -1389,6 +1389,9 @@ void CppCheck::checkNormalTokens(const Tokenizer &tokenizer, AnalyzerInformation
 
     CheckUnusedFunctions unusedFunctionsChecker;
 
+    // the tokens do not change during the checks
+    const WarningHashCache warningHashCache(tokenizer.list);
+
     // TODO: this should actually be the behavior if only "--enable=unusedFunction" is specified - see #10648
     // TODO: log message when this is active?
     const bool doUnusedFunctionOnly = Settings::unusedFunctionOnly();

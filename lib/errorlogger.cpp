@@ -36,6 +36,7 @@
 #include <cstring>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <numeric>
 #include <sstream>
 #include <string>
@@ -65,6 +66,9 @@ const std::set<std::string> ErrorLogger::mCriticalErrorIds{
 static std::size_t sdbm(std::size_t h, unsigned char c) {
     return static_cast<std::size_t>(c) + (h << 6) + (h << 16) - h;
 }
+
+// sdbm(h, c) == h * sdbmFactor + c, so the hash of a + b is hash(a) * sdbmFactor^length(b) + hash(b)
+static constexpr std::size_t sdbmFactor = 65599;
 
 // the hash of a string that follows the string with hash h
 static std::size_t sdbm(std::size_t h, const std::string& hashString) {
@@ -136,7 +140,7 @@ ErrorMessage::ErrorMessage(const std::list<const Token*>& callstack, const Token
 
     setmsg(msg);
 
-    calculateWarningHash(callstack);
+    calculateWarningHash(callstack, list ? list->getWarningHashCache() : nullptr);
 }
 
 
@@ -157,7 +161,7 @@ ErrorMessage::ErrorMessage(const std::list<const Token*>& callstack, const Token
 
     setmsg(msg);
 
-    calculateWarningHash(callstack);
+    calculateWarningHash(callstack, list ? list->getWarningHashCache() : nullptr);
 }
 
 ErrorMessage::ErrorMessage(ErrorPath errorPath, const TokenList *tokenList, Severity severity, const char id[], const std::string &msg, const CWE &cwe, Certainty certainty)
@@ -195,7 +199,7 @@ ErrorMessage::ErrorMessage(ErrorPath errorPath, const TokenList *tokenList, Seve
                    [](const ErrorPathItem& e) {
         return e.first;
     });
-    calculateWarningHash(tokens);
+    calculateWarningHash(tokens, tokenList ? tokenList->getWarningHashCache() : nullptr);
 }
 
 // TODO: improve errorhandling?
@@ -280,7 +284,7 @@ void ErrorMessage::setmsg(const std::string &msg)
     }
 }
 
-void ErrorMessage::calculateWarningHash(const std::list<const Token*>& callstack)
+void ErrorMessage::calculateWarningHash(const std::list<const Token*>& callstack, WarningHashCache* cache)
 {
     if (callstack.empty())
         return;
@@ -302,6 +306,8 @@ void ErrorMessage::calculateWarningHash(const std::list<const Token*>& callstack
         if (tok->scope()->isExecutable()) {
             // Executable scope => include all tokens in the function => if the
             // function is changed the hash is changed
+            if (cache && cache->add(h, tok))
+                continue;
             for (const Token* t = tok; t; t = t->previous()) {
                 if (!t->scope()->isExecutable())
                     break;
@@ -332,6 +338,77 @@ void ErrorMessage::calculateWarningHash(const std::list<const Token*>& callstack
     }
 
     hash = h;
+}
+
+WarningHashCache::WarningHashCache(const TokenList& tokenList) : mTokenList(tokenList)
+{
+    mTokenList.setWarningHashCache(this);
+}
+
+WarningHashCache::~WarningHashCache()
+{
+    mTokenList.setWarningHashCache(nullptr);
+}
+
+bool WarningHashCache::add(std::size_t& h, const Token* tok)
+{
+    auto it = mTokens.upper_bound(tok->index());
+    if (it == mTokens.begin() || tok->index() > std::prev(it)->second.last->index()) {
+        // the same tokens as in calculateWarningHash()
+        Tokens tokens;
+        tokens.first = tok;
+        while (tokens.first->previous() && tokens.first->previous()->scope()->isExecutable())
+            tokens.first = tokens.first->previous();
+        tokens.last = tok;
+        while (tokens.last->next() && tokens.last->next()->scope()->isExecutable())
+            tokens.last = tokens.last->next();
+
+        tokens.cached = true;
+        std::vector<std::size_t> pieceHash;
+        std::vector<std::size_t> piecePower;
+        for (const Token* t = tokens.first;; t = t->next()) {
+            if (t != tokens.last && t->next()->index() != t->index() + 1) {
+                tokens.cached = false;
+                break;
+            }
+            const std::size_t pieceH = sdbm(sdbm(0, ' '), t->str());
+            std::size_t power = sdbmFactor;
+            for (std::size_t i = 0; i < t->str().size(); ++i)
+                power *= sdbmFactor;
+            pieceHash.push_back(pieceH);
+            piecePower.push_back(power);
+            if (t == tokens.last)
+                break;
+        }
+        if (tokens.cached) {
+            const std::size_t n = pieceHash.size();
+            tokens.backward.resize(n);
+            std::size_t powerBefore = 1;
+            for (std::size_t i = 0; i < n; ++i) {
+                tokens.backward[i] = pieceHash[i] * powerBefore + (i > 0 ? tokens.backward[i - 1] : 0);
+                powerBefore *= piecePower[i];
+            }
+            tokens.powerAll = powerBefore;
+            tokens.forward.resize(n + 1);
+            tokens.powerAfter.resize(n);
+            std::size_t powerAfter = 1;
+            for (std::size_t i = n; i > 0; --i) {
+                tokens.forward[i - 1] = pieceHash[i - 1] * powerAfter + tokens.forward[i];
+                tokens.powerAfter[i - 1] = powerAfter;
+                powerAfter *= piecePower[i - 1];
+            }
+        }
+        it = mTokens.emplace(tokens.first->index(), std::move(tokens)).first;
+    } else {
+        --it;
+    }
+    const Tokens& tokens = it->second;
+    if (!tokens.cached)
+        return false;
+    // the pieces i, ..., 0 and then i + 1, ..., n - 1
+    const std::size_t i = tok->index() - tokens.first->index();
+    h = h * tokens.powerAll + tokens.backward[i] * tokens.powerAfter[i] + tokens.forward[i + 1];
+    return true;
 }
 
 void ErrorMessage::calculateWarningHashFromLocations()

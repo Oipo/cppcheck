@@ -24,6 +24,7 @@
 #include "config.h"
 #include "errortypes.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <ctime>
 #include <list>
@@ -36,6 +37,7 @@
 
 class Token;
 class TokenList;
+class WarningHashCache;
 enum class ReportType : std::uint8_t;
 enum class Color : std::uint8_t;
 
@@ -211,7 +213,7 @@ public:
 private:
     static std::string fixInvalidChars(const std::string& raw);
 
-    void calculateWarningHash(const std::list<const Token*>& callstack);
+    void calculateWarningHash(const std::list<const Token*>& callstack, WarningHashCache* cache);
 
     /**
      * Fallback hash calculation for warnings that have no token information
@@ -228,6 +230,48 @@ private:
 
     /** symbol names */
     std::string mSymbolNames;
+};
+
+/**
+ * The warning hash of a token in an executable scope covers all the tokens of the scope. While the
+ * tokens do not change (during the checks) this cache keeps the hashes of the prefixes and suffixes
+ * of these tokens, so a warning costs O(1) instead of the length of the scope.
+ */
+class CPPCHECKLIB WarningHashCache {
+public:
+    /** The cache of tokenList while this object lives */
+    explicit WarningHashCache(const TokenList& tokenList);
+    ~WarningHashCache();
+    WarningHashCache(const WarningHashCache&) = delete;
+    WarningHashCache& operator=(const WarningHashCache&) = delete;
+
+    /**
+     * Add the tokens of the executable scope of tok to the hash h like calculateWarningHash() does
+     * without a cache: tok and the tokens before it backwards, then the tokens after it.
+     * @return false if the tokens are not cached, h is not changed then
+     */
+    bool add(std::size_t& h, const Token* tok);
+
+private:
+    /** The consecutive tokens in executable scopes, first to last */
+    struct Tokens {
+        const Token* first{};
+        const Token* last{};
+        // false if the indexes of the tokens are not consecutive
+        bool cached{};
+        // the hash of the pieces i, i - 1, ..., 0 (a piece is " " + str() of a token)
+        std::vector<std::size_t> backward;
+        // the hash of the pieces i, ..., n - 1, and 0 at n
+        std::vector<std::size_t> forward;
+        // the hash factor to the power of the length of the pieces i + 1, ..., n - 1
+        std::vector<std::size_t> powerAfter;
+        // the hash factor to the power of the length of all the pieces
+        std::size_t powerAll{};
+    };
+
+    const TokenList& mTokenList;
+    /** By the index of the first token */
+    std::map<nonneg int, Tokens> mTokens;
 };
 
 /**
