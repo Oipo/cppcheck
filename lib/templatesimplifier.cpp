@@ -2113,8 +2113,10 @@ void TemplateSimplifier::expandTemplate(
                                 name += type->str();
                                 type = type->next();
                             }
-                            // check if type is instantiated
-                            if (std::any_of(mTemplateInstantiations.cbegin(), mTemplateInstantiations.cend(), [&](const TokenAndName& inst) {
+                            // check if type is instantiated, a template that is not declared (std::vector) is not
+                            if (std::any_of(mTemplateDeclarations.cbegin(), mTemplateDeclarations.cend(), [&](const TokenAndName& decl) {
+                                return decl.name() == start->str();
+                            }) && std::any_of(mTemplateInstantiations.cbegin(), mTemplateInstantiations.cend(), [&](const TokenAndName& inst) {
                                 return Token::simpleMatch(inst.token(), name.c_str(), name.size());
                             })) {
                                 // use the instantiated name

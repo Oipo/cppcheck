@@ -226,6 +226,7 @@ private:
         TEST_CASE(template182); // #13770
         TEST_CASE(template183);
         TEST_CASE(template184);
+        TEST_CASE(template185);
         TEST_CASE(template_specialization_1);  // #7868 - template specialization template <typename T> struct S<C<T>> {..};
         TEST_CASE(template_specialization_2);  // #7868 - template specialization template <typename T> struct S<C<T>> {..};
         TEST_CASE(template_specialization_3);
@@ -4701,6 +4702,21 @@ private:
                            " g<float> ( 1.0f ) ; "
                            "}";
         ASSERT_EQUALS(exp, tok(code)); // TODO: instantiate g<int>(int)
+    }
+
+    void template185() {
+        // the declaration and the definition of the instantiation have the same parameters, so they match
+        const char code[] = "class Test {\n"
+                            "    template<class T> static void g(std::vector<int> v) {}\n"
+                            "    void f() const { g<int>(std::vector<int>()); }\n"
+                            "};\n";
+        const char exp[] = "class Test { "
+                           "static void g<int> ( std :: vector < int > v ) ; "
+                           "void f ( ) const { g<int> ( std :: vector < int > ( ) ) ; } "
+                           "} ; "
+                           "void Test :: g<int> ( std :: vector < int > v ) { }";
+        ASSERT_EQUALS(exp, tok(code, dinit(CheckOptions, $.debugwarnings = true)));
+        ASSERT_EQUALS("", errout_str());
     }
 
     void template_specialization_1() {  // #7868 - template specialization template <typename T> struct S<C<T>> {..};
