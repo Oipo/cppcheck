@@ -1125,28 +1125,19 @@ bool isAliasOf(const Token* tok, const Token* expr, nonneg int* indirect)
     return r;
 }
 
-static bool isAliasToken(const Token *tok, nonneg int varid)
-{
-    return Token::Match(tok, "= & %varid% ;", varid) || isAliasOf(tok, varid);
-}
-
 static bool isAliased(const Token *startTok, const Token *endTok, nonneg int varid, const SymbolDatabase& symbolDatabase)
 {
     if (!precedes(startTok, endTok))
         return false;
+    // when the values do not change any more, the search goes on where the last one for this variable stopped
+    SymbolDatabase::AliasScan local{};
     SymbolDatabase::AliasScan* scan = symbolDatabase.aliasScan(varid);
-    if (!scan) {
-        for (const Token *tok = startTok; tok != endTok; tok = tok->next()) {
-            if (isAliasToken(tok, varid))
-                return true;
-        }
-        return false;
-    }
-    // the values do not change, so the search goes on where the last one for this variable stopped
+    if (!scan)
+        scan = &local;
     if (scan->start != startTok)
         *scan = {startTok, startTok, nullptr};
     for (; !scan->alias && precedes(scan->end, endTok); scan->end = scan->end->next()) {
-        if (isAliasToken(scan->end, varid))
+        if (Token::Match(scan->end, "= & %varid% ;", varid) || isAliasOf(scan->end, varid))
             scan->alias = scan->end;
     }
     return scan->alias && precedes(scan->alias, endTok);

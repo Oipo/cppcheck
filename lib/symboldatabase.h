@@ -1407,7 +1407,7 @@ public:
 
     /** The values of the tokens do not change any more, so the checks can cache what they find in them */
     void setValuesFinal() {
-        mValuesFinal = true;
+        mAliasScans.resize(mVariableList.size());
     }
 
     /** How far the search for an alias of a variable got, see isAliased() in astutils.cpp */
@@ -1420,11 +1420,7 @@ public:
 
     /** The AliasScan of the variable, nullptr if the values can still change */
     AliasScan* aliasScan(nonneg int varid) const {
-        if (!mValuesFinal || varid >= mVariableList.size())
-            return nullptr;
-        if (mAliasScans.empty())
-            mAliasScans.resize(mVariableList.size());
-        return &mAliasScans[varid];
+        return varid < mAliasScans.size() ? &mAliasScans[varid] : nullptr;
     }
 
     /**
@@ -1555,7 +1551,7 @@ private:
 
     mutable std::map<const Type*, bool> mIsRecordTypeWithoutSideEffectsMap;
 
-    bool mValuesFinal{};
+    /** Empty until setValuesFinal() */
     mutable std::vector<AliasScan> mAliasScans;
 };
 
