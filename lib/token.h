@@ -285,6 +285,14 @@ public:
         mImpl->mVarId = 0;
 
         update_property_info();
+#ifndef NDEBUG
+        // the previous token is followed by another string
+        recordChange();
+        if (mPrevious)
+            mPrevious->recordChange();
+        if (mLink)
+            recordBlockChange();
+#endif
     }
 
     /**
@@ -860,6 +868,9 @@ public:
         if (!mImpl->mTemplateSimplifierPointers)
             mImpl->mTemplateSimplifierPointers = new std::set<TemplateSimplifier::TokenAndName*>;
         mImpl->mTemplateSimplifierPointers->insert(tokenAndName);
+#ifndef NDEBUG
+        recordChange();
+#endif
     }
     bool setBits(const MathLib::bigint b) {
         const MathLib::bigint max = std::numeric_limits<short>::max();
@@ -1254,6 +1265,11 @@ public:
         mLink = linkToToken;
         if (mStr == "<" || mStr == ">")
             update_property_info();
+#ifndef NDEBUG
+        // a '{' or '}' without a link is an ordinary token for the summaries
+        recordChange();
+        recordBlockChange();
+#endif
     }
 
     /**
@@ -1396,6 +1412,10 @@ public:
                 return;
             mImpl->mBlockSummary.reset(new BlockSummaryData);
         }
+#ifndef NDEBUG
+        if (summary != mImpl->mBlockSummary->summary)
+            recordSummaryChange();
+#endif
         mImpl->mBlockSummary->summary = summary;
     }
     /** The names in the block that starts at this '{' */
@@ -1409,6 +1429,11 @@ public:
                 return;
             mImpl->mBlockSummary.reset(new BlockSummaryData);
         }
+#ifndef NDEBUG
+        // adding names to the summary can not make it wrong
+        if (!names.includes(mImpl->mBlockSummary->names))
+            recordSummaryChange();
+#endif
         mImpl->mBlockSummary->names = names;
     }
 
@@ -1531,10 +1556,26 @@ private:
 
     void next(Token *nextToken) {
         mNext = nextToken;
+#ifndef NDEBUG
+        recordChange();
+#endif
     }
     void previous(Token *previousToken) {
         mPrevious = previousToken;
+#ifndef NDEBUG
+        recordChange();
+#endif
     }
+
+    /** Add this token to the changed tokens of the list, when they are recorded */
+    void recordChange();
+    /** Add this token to the tokens of the list whose link is changed or that are moved with their
+     * link, when they are recorded, and count the change of the blocks */
+    void recordBlockChange();
+    /** Add this token to the tokens of the list whose block summary is changed, when they are recorded */
+    void recordSummaryChange();
+    /** Count a change of the blocks: tokens are moved */
+    void recordMove();
 
     /** used by deleteThis() to take data from token to delete */
     void takeData(Token *fromToken);

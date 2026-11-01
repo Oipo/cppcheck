@@ -41,6 +41,22 @@ class Tokenizer;
 class TokenList;
 struct newInstantiation;
 
+/**
+ * @brief The changes of a token list, they are recorded for the checks of the template simplifier in
+ * builds with assertions.
+ */
+struct TokenListChanges {
+    /** the tokens that are changed, added or moved, or that are followed by another token */
+    std::unordered_set<const Token*> tokens;
+    /** the tokens whose link or block summary is changed */
+    std::unordered_set<const Token*> blocks;
+    /** the number of changes that can change which blocks contain a token: a link is changed, a
+     * token with a link is deleted, or tokens are moved */
+    std::size_t blockChanges{};
+    /** tokens whose deletion is recorded, and whether they are deleted */
+    std::vector<std::pair<const Token*, bool>> watched;
+};
+
 /// @addtogroup Core
 /// @{
 
@@ -540,6 +556,21 @@ private:
 
     /** are the names in the summaries of the blocks with "template" known */
     bool mTemplateBlockNamesKnown{};
+
+#ifndef NDEBUG
+    /**
+     * Can expandTemplate() and replaceTemplateUsage() skip what they skip. After a check of all
+     * blocks, the tokens and blocks that changed since the last check are checked.
+     */
+    bool blockSummariesAreValid();
+
+    /** the changes since the last check of the summaries of the blocks, during simplifyTemplates() */
+    TokenListChanges mChangedTokens;
+    bool mRecordingChanges{};
+    /** are all summaries checked while the changes are recorded, and with which mTemplateBlockNamesKnown */
+    bool mBlockSummariesChecked{};
+    bool mCheckedBlockNamesKnown{};
+#endif
 
     std::map<std::string, std::set<std::string>> mUsedVariables;
 };

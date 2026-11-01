@@ -20,6 +20,7 @@
 #include "helpers.h"
 #include "settings.h"
 #include "standards.h"
+#include "templatesimplifier.h"
 #include "token.h"
 #include "tokenlist.h"
 #include "vfvalue.h"
@@ -136,6 +137,9 @@ private:
 
         TEST_CASE(blockNameSet);
         TEST_CASE(blockSummaryStorage);
+#ifndef NDEBUG
+        TEST_CASE(recordChanges);
+#endif
     }
 
     void nextprevious() const {
@@ -1601,6 +1605,91 @@ private:
         TokenList::deleteTokens(open);
     }
 
+#ifndef NDEBUG
+    void recordChanges() const {
+        TokenListChanges changes;
+        auto tokensFrontBack = std::make_shared<TokensFrontBack>();
+        tokensFrontBack->changedTokens = &changes;
+        auto *front = new Token(list, tokensFrontBack);
+        front->str("f");
+        Token *open = front->insertToken("{");
+        Token *name = open->insertToken("x");
+        Token *close = name->insertToken("}");
+        Token *last = close->insertToken(";");
+        Token *other = last->insertToken("y");
+
+        // a link change is a change of the token and of the blocks
+        changes = TokenListChanges();
+        Token::createMutualLinks(open, close);
+        ASSERT_EQUALS(1U, changes.tokens.count(open));
+        ASSERT_EQUALS(1U, changes.tokens.count(close));
+        ASSERT_EQUALS(1U, changes.blocks.count(open));
+        ASSERT_EQUALS(1U, changes.blocks.count(close));
+        ASSERT_EQUALS(2U, changes.blockChanges);
+
+        // setting the same link again changes nothing
+        changes = TokenListChanges();
+        open->link(close);
+        ASSERT(changes.tokens.empty());
+        ASSERT(changes.blocks.empty());
+        ASSERT_EQUALS(0U, changes.blockChanges);
+
+        // a changed summary is a changed block, the blocks themselves did not change
+        open->blockSummary(1);
+        ASSERT(changes.tokens.empty());
+        ASSERT_EQUALS(1U, changes.blocks.count(open));
+        ASSERT_EQUALS(0U, changes.blockChanges);
+
+        // the same summary, or more names, can not make the summary wrong
+        changes = TokenListChanges();
+        open->blockSummary(1);
+        open->blockNames(BlockNameSet::ofHash(1));
+        open->blockNames(BlockNameSet::ofHash(1) | BlockNameSet::ofHash(2));
+        ASSERT(changes.blocks.empty());
+        // fewer names can
+        open->blockNames(BlockNameSet::ofHash(2));
+        ASSERT_EQUALS(1U, changes.blocks.count(open));
+
+        // a changed string is a changed token
+        changes = TokenListChanges();
+        name->str("z");
+        ASSERT_EQUALS(1U, changes.tokens.count(name));
+        ASSERT_EQUALS(0U, changes.blockChanges);
+
+        // moving tokens changes the blocks
+        changes = TokenListChanges();
+        Token::move(last, last, front);
+        ASSERT_EQUALS(last, front->next());
+        ASSERT(changes.blockChanges > 0);
+
+        // removing a link changes the blocks
+        changes = TokenListChanges();
+        close->link(nullptr);
+        ASSERT_EQUALS(1U, changes.tokens.count(close));
+        ASSERT_EQUALS(1U, changes.blocks.count(close));
+        ASSERT_EQUALS(1U, changes.blockChanges);
+        close->link(open);
+
+        // a deleted token is no longer a changed token, a deleted linked token changes the blocks,
+        // and a watched token that is deleted is marked
+        changes = TokenListChanges();
+        changes.watched.emplace_back(close, false);
+        changes.watched.emplace_back(last, false);
+        name->str("w");
+        ASSERT_EQUALS(1U, changes.tokens.count(name));
+        open->link(nullptr);
+        changes.blockChanges = 0;
+        open->deleteNext(2);
+        ASSERT_EQUALS(0U, changes.tokens.count(name));
+        ASSERT_EQUALS(1U, changes.blockChanges);
+        ASSERT_EQUALS(true, changes.watched[0].second);
+        ASSERT_EQUALS(false, changes.watched[1].second);
+        ASSERT_EQUALS(other, open->next());
+
+        tokensFrontBack->changedTokens = nullptr;
+        TokenList::deleteTokens(front);
+    }
+#endif
 #undef assert_tok
 };
 

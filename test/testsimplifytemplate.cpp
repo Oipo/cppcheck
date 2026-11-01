@@ -332,6 +332,7 @@ private:
         TEST_CASE(template_shift_negative); // shift folding with a negative operand
 
         TEST_CASE(templateUsageInBlocks); // blocks that are skipped when looking for template usage
+        TEST_CASE(templateUsageInDeepBlocks); // stack overflow when looking for the blocks that enclose a token
         TEST_CASE(templateMemberTemplateOutOfLine);
         TEST_CASE(templateTemplateParameterOutOfLine);
         TEST_CASE(templateMemberOfMemberTemplateOutOfLine);
@@ -7043,6 +7044,19 @@ private:
                                 "S<9223372036854775808U> s1 ; S<1> s2 ; S<1> s3 ; "
                                 "struct S<9223372036854775808U> { } ; struct S<1> { } ;";
         ASSERT_EQUALS(expected, tok(code));
+    }
+
+    void templateUsageInDeepBlocks() {
+        // the blocks that enclose a token are looked up without recursion
+        const std::size_t depth = 50000;
+        const std::string code = "template<class T> void g(T) {}\n"
+                                 "void f() " + std::string(depth, '{') + " g<int>(1); g<char>('a'); { g<long>(2L); } " + std::string(depth, '}');
+        SimpleTokenizer tokenizer(settings1, *this);
+        ASSERT(tokenizer.tokenize(code));
+        const std::string out = tokenizer.tokens()->stringifyList(nullptr, true);
+        ASSERT_EQUALS(0U, out.find("void g<int> ( int ) ; void g<char> ( char ) ; void g<long> ( long ) ; void f ( ) {"));
+        ASSERT(out.find("void f ( ) { g<int> ( 1 ) ; g<char> ( 'a' ) ; { g<long> ( 2L ) ; } }") != std::string::npos);
+        ASSERT(out.find("void g<int> ( int ) { } void g<char> ( char ) { } void g<long> ( long ) { }") != std::string::npos);
     }
 
     void templateUsageInBlocks() {

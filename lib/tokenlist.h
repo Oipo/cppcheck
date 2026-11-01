@@ -31,6 +31,7 @@
 #include <vector>
 
 class Token;
+struct TokenListChanges;
 class Settings;
 class WarningHashCache;
 
@@ -47,6 +48,8 @@ namespace simplecpp {
 struct TokensFrontBack {
     Token *front{};
     Token* back{};
+    /** the changes of the tokens when they are recorded */
+    TokenListChanges* changedTokens{};
 };
 
 class CPPCHECKLIB TokenList {
@@ -134,6 +137,12 @@ public:
     // NOLINTNEXTLINE(readability-make-member-function-const) - do not allow usage of mutable pointer from const object
     Token *back() {
         return mTokensFrontBack->back;
+    }
+
+    /** Record the changes of the tokens in changedTokens (builds with assertions), nullptr stops the
+     * recording */
+    void recordChangedTokens(TokenListChanges* changedTokens) {
+        mTokensFrontBack->changedTokens = changedTokens;
     }
 
     /**

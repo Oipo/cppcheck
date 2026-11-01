@@ -79,7 +79,46 @@ Token::Token(const Token* tok)
 
 Token::~Token()
 {
+#ifndef NDEBUG
+    if (mTokensFrontBack && mTokensFrontBack->changedTokens) {
+        TokenListChanges &changes = *mTokensFrontBack->changedTokens;
+        changes.tokens.erase(this);
+        changes.blocks.erase(this);
+        if (mLink)
+            ++changes.blockChanges;
+        for (std::pair<const Token*, bool> &w : changes.watched) {
+            if (w.first == this)
+                w.second = true;
+        }
+    }
+#endif
     delete mImpl;
+}
+
+void Token::recordChange()
+{
+    if (mTokensFrontBack && mTokensFrontBack->changedTokens)
+        mTokensFrontBack->changedTokens->tokens.insert(this);
+}
+
+void Token::recordBlockChange()
+{
+    if (mTokensFrontBack && mTokensFrontBack->changedTokens) {
+        mTokensFrontBack->changedTokens->blocks.insert(this);
+        ++mTokensFrontBack->changedTokens->blockChanges;
+    }
+}
+
+void Token::recordSummaryChange()
+{
+    if (mTokensFrontBack && mTokensFrontBack->changedTokens)
+        mTokensFrontBack->changedTokens->blocks.insert(this);
+}
+
+void Token::recordMove()
+{
+    if (mTokensFrontBack && mTokensFrontBack->changedTokens)
+        ++mTokensFrontBack->changedTokens->blockChanges;
 }
 
 void* Token::operator new(std::size_t size)
@@ -269,6 +308,9 @@ void Token::concatStr(std::string const& b)
         mStr.insert(0, b.substr(0, b.find('"')));
     }
     update_property_info();
+#ifndef NDEBUG
+    recordChange();
+#endif
 }
 
 std::string Token::strValue() const
@@ -306,6 +348,9 @@ void Token::deleteNext(nonneg int count)
         delete n;
         --count;
     }
+#ifndef NDEBUG
+    recordChange();
+#endif
 
     if (mNext)
         mNext->previous(this);
@@ -326,6 +371,9 @@ void Token::deletePrevious(nonneg int count)
         delete p;
         --count;
     }
+#ifndef NDEBUG
+    recordChange();
+#endif
 
     if (mPrevious)
         mPrevious->next(this);
@@ -336,6 +384,19 @@ void Token::deletePrevious(nonneg int count)
 void Token::swapWithNext()
 {
     if (mNext) {
+#ifndef NDEBUG
+        // the previous token is followed by another string, the links and the block summaries move
+        recordChange();
+        mNext->recordChange();
+        if (mPrevious)
+            mPrevious->recordChange();
+        recordBlockChange();
+        mNext->recordBlockChange();
+        if (mLink)
+            mLink->recordBlockChange();
+        if (mNext->mLink)
+            mNext->mLink->recordBlockChange();
+#endif
         std::swap(mStr, mNext->mStr);
         std::swap(mTokType, mNext->mTokType);
         std::swap(mFlags, mNext->mFlags);
@@ -361,6 +422,13 @@ void Token::swapWithNext()
 
 void Token::takeData(Token *fromToken)
 {
+#ifndef NDEBUG
+    // the previous token is followed by another string, the link and the block summary move
+    recordChange();
+    if (mPrevious)
+        mPrevious->recordChange();
+    recordBlockChange();
+#endif
     mStr = fromToken->mStr;
     tokType(fromToken->mTokType);
     mFlags = fromToken->mFlags;
@@ -420,8 +488,19 @@ void Token::replace(Token *replaceThis, Token *start, Token *end)
     }
 
     // Update mProgressValue, fileIndex and linenr
-    for (Token *tok = start; tok != end->next(); tok = tok->next())
+    for (Token *tok = start; tok != end->next(); tok = tok->next()) {
         tok->mImpl->mProgressValue = replaceThis->mImpl->mProgressValue;
+#ifndef NDEBUG
+        // a block of which only one end is moved changes
+        tok->recordChange();
+        if (tok->mLink)
+            tok->mLink->recordBlockChange();
+#endif
+    }
+#ifndef NDEBUG
+    // the moved tokens can be in other blocks
+    start->recordMove();
+#endif
 
     // Delete old token, which is replaced
     delete replaceThis;
@@ -831,8 +910,19 @@ void Token::move(Token *srcStart, Token *srcEnd, Token *newLocation)
     newLocation->next(srcStart);
 
     // Update _progressValue
-    for (Token *tok = srcStart; tok != srcEnd->next(); tok = tok->next())
+    for (Token *tok = srcStart; tok != srcEnd->next(); tok = tok->next()) {
         tok->mImpl->mProgressValue = newLocation->mImpl->mProgressValue;
+#ifndef NDEBUG
+        // a block of which only one end is moved changes
+        tok->recordChange();
+        if (tok->mLink)
+            tok->mLink->recordBlockChange();
+#endif
+    }
+#ifndef NDEBUG
+    // the moved tokens can be in other blocks
+    srcStart->recordMove();
+#endif
 }
 
 template<class T, REQUIRES("T must be a Token class", std::is_convertible<T*, const Token*> )>

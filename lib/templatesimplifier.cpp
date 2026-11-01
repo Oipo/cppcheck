@@ -30,6 +30,8 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
+#include <initializer_list>
 #include <iostream>
 #include <iterator>
 #include <map>
@@ -38,6 +40,7 @@
 #include <stack>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 static Token *skipRequires(Token *tok)
@@ -1809,18 +1812,199 @@ static void summarizeBlocks(Token *start, const Token *end)
 }
 
 #ifndef NDEBUG
-// Can expandTemplate() and replaceTemplateUsage() skip what they skip: a block without "template"
+// Is the summary of the block valid for the "template" and names in it: a block without "template"
 // has no "template", and the names of a block that can be skipped include all its names
-static bool blockSummariesAreValid(const Token *start, bool namesKnown)
+static bool isBlockSummaryValid(const Token *block, bool hasTemplate, const BlockNameSet &names, bool namesKnown)
+{
+    const TemplateInBlock t = templateInBlock(block);
+    if (t == TemplateInBlock::No && hasTemplate)
+        return false;
+    return !((t == TemplateInBlock::No || (t == TemplateInBlock::Yes && namesKnown)) && !block->blockNames().includes(names));
+}
+
+// Can expandTemplate() and replaceTemplateUsage() skip what they skip, all blocks from start
+static bool allBlockSummariesAreValid(const Token *start, bool namesKnown)
 {
     bool valid = true;
     forEachBlockSummary(start, nullptr, [&](const Token *block, bool hasTemplate, const BlockNameSet &names) {
-        const TemplateInBlock t = templateInBlock(block);
-        if (t == TemplateInBlock::No && hasTemplate)
-            valid = false;
-        if ((t == TemplateInBlock::No || (t == TemplateInBlock::Yes && namesKnown)) && !block->blockNames().includes(names))
+        if (!isBlockSummaryValid(block, hasTemplate, names, namesKnown))
             valid = false;
     });
+    return valid;
+}
+
+namespace {
+    // The innermost blocks that contain the tokens, as forEachBlockSummary() finds them. The '}' of a
+    // block is in it. The results are cached while the tokens do not change, for every 8th token of a
+    // walk, so a walk from a token near a token that is looked up is short.
+    class EnclosingBlocks {
+    public:
+        explicit EnclosingBlocks(const Token *front) : mFront(front) {}
+
+        struct Result {
+            const Token *block; // nullptr outside of blocks
+            bool inList;
+        };
+
+        Result of(const Token *tok) {
+            // The walk back from tok ends at a cached token, at the front, or at the '{' of the block
+            // that contains it: then the walk goes on from the '{' to find out if it is in the list.
+            // The tokens of each walk and the '{' it ended at.
+            std::vector<std::pair<std::vector<const Token *>, const Token *>> walks;
+            Result last{nullptr, false}; // the result of the last walk
+            // the '}' that the walks jumped from: a '}' that is linked to a token after it would make
+            // them go on forever
+            std::unordered_set<const Token *> jumpedFrom;
+            for (const Token *start = tok; start;) {
+                std::vector<const Token *> path;
+                const Token *block = nullptr;
+                for (const Token *t = start;;) {
+                    const auto it = mCache.find(t);
+                    if (it != mCache.end()) {
+                        last = it->second;
+                        break;
+                    }
+                    path.push_back(t);
+                    const Token *prev = t->previous();
+                    if (!prev) {
+                        last = {nullptr, t == mFront};
+                        break;
+                    }
+                    if (prev->str() == "{" && prev->link()) {
+                        block = prev;
+                        break;
+                    }
+                    // a block before t
+                    if (prev->str() == "}" && prev->link()) {
+                        assert(prev->link()->str() == "{" && prev->link()->link() == prev);
+                        const bool first = jumpedFrom.insert(prev).second;
+                        assert(first);
+                        t = prev->link();
+                    } else {
+                        t = prev;
+                    }
+                }
+                walks.emplace_back(std::move(path), block);
+                start = block;
+            }
+            // the walks that ended at a '{' are in the list when the last walk is
+            Result result = last;
+            for (auto walk = walks.rbegin(); walk != walks.rend(); ++walk) {
+                if (walk->second)
+                    result = {walk->second, last.inList};
+                for (std::size_t i = 0; i < walk->first.size(); i += 8)
+                    mCache.emplace(walk->first[i], result);
+            }
+            return result;
+        }
+
+    private:
+        const Token *mFront;
+        std::unordered_map<const Token *, Result> mCache;
+    };
+}
+
+bool TemplateSimplifier::blockSummariesAreValid()
+{
+    const bool namesKnown = mTemplateBlockNamesKnown;
+    if (!mBlockSummariesChecked || mCheckedBlockNamesKnown != namesKnown) {
+        mChangedTokens.tokens.clear();
+        mChangedTokens.blocks.clear();
+        mBlockSummariesChecked = mRecordingChanges;
+        mCheckedBlockNamesKnown = namesKnown;
+        return allBlockSummariesAreValid(mTokenList.front(), namesKnown);
+    }
+
+    // The summaries were valid at the last check. A summary can be wrong after a change of a token in
+    // the block, of the block (its link or its summary), or of the token after a token in it.
+    EnclosingBlocks enclosing(mTokenList.front());
+    bool valid = true;
+
+    // The "template" and the names of the changes in each block and in its inner blocks. They are
+    // added to the blocks outward until a block already has them: the blocks that contain that
+    // block have them too, so every block gets each name once.
+    struct Contents {
+        bool hasTemplate;
+        BlockNameSet names;
+    };
+    std::unordered_map<const Token *, Contents> contents;
+    const auto addToBlocks = [&](const Token *block, bool hasTemplate, const BlockNameSet &names) {
+        for (; block; block = enclosing.of(block).block) {
+            Contents &c = contents[block];
+            if ((c.hasTemplate || !hasTemplate) && c.names.includes(names))
+                break;
+            c.hasTemplate = c.hasTemplate || hasTemplate;
+            c.names |= names;
+        }
+    };
+
+    for (const Token *tok : mChangedTokens.tokens) {
+        const EnclosingBlocks::Result result = enclosing.of(tok);
+        if (!result.inList || (tok->str() == "{" && tok->link()))
+            continue;
+        const bool hasTemplate = tok->str() == "template";
+        if (!hasTemplate && !Token::simpleMatch(tok->next(), "<"))
+            continue;
+        const BlockNameSet names = Token::simpleMatch(tok->next(), "<") ? nameBits(tok) : BlockNameSet();
+        // the '}' of a block is in the block that contains the block
+        const Token *block = result.block;
+        if (tok->str() == "}" && tok->link())
+            block = enclosing.of(tok->link()).block;
+        addToBlocks(block, hasTemplate, names);
+    }
+
+    // the blocks that are checked again, the '{' of a '}'
+    std::unordered_set<const Token *> blocks;
+    for (const Token *tok : mChangedTokens.blocks) {
+        const Token *block = (tok->str() == "}" && tok->link()) ? tok->link() : tok;
+        if (block->str() == "{" && block->link() && enclosing.of(block).inList)
+            blocks.insert(block);
+    }
+    // is a block in a block that is checked again, remembered for the blocks on the way out
+    std::unordered_map<const Token *, bool> inCheckedBlock;
+    const auto isInCheckedBlock = [&](const Token *block) {
+        std::vector<const Token *> path;
+        bool result = false;
+        for (const Token *outer = enclosing.of(block).block; outer; outer = enclosing.of(outer).block) {
+            const auto it = inCheckedBlock.find(outer);
+            if (it != inCheckedBlock.end()) {
+                result = it->second;
+                break;
+            }
+            if (blocks.count(outer) != 0) {
+                result = true;
+                break;
+            }
+            path.push_back(outer);
+        }
+        for (const Token *b : path)
+            inCheckedBlock.emplace(b, result);
+        return result;
+    };
+    for (const Token *block : blocks) {
+        // a block in a block that is checked again is checked with it
+        if (isInCheckedBlock(block))
+            continue;
+        bool hasTemplate = false;
+        BlockNameSet names;
+        forEachBlockSummary(block, block->link()->next(), [&](const Token *b, bool h, const BlockNameSet &n) {
+            if (!isBlockSummaryValid(b, h, n, namesKnown))
+                valid = false;
+            if (b == block) {
+                hasTemplate = h;
+                names = n;
+            }
+        });
+        addToBlocks(enclosing.of(block).block, hasTemplate, names);
+    }
+
+    for (const std::pair<const Token *const, Contents> &c : contents) {
+        if (!isBlockSummaryValid(c.first, c.second.hasTemplate, c.second.names, namesKnown))
+            valid = false;
+    }
+
+    mChangedTokens.tokens.clear();
+    mChangedTokens.blocks.clear();
     return valid;
 }
 #endif
@@ -1857,14 +2041,48 @@ static bool isBlockWithoutTemplate(Token *tok)
 }
 
 #ifndef NDEBUG
-// Is tok in the block that starts at the '{' block
-static bool isInBlock(const Token *tok, const Token *block)
+namespace {
+    // Record whether tokens are deleted while the object lives, when the changes of the tokens are
+    // recorded
+    class WatchedTokens {
+    public:
+        WatchedTokens(TokenListChanges &changes, std::initializer_list<const Token *> tokens) : mChanges(changes), mStart(changes.watched.size()) {
+            for (const Token *tok : tokens)
+                mChanges.watched.emplace_back(tok, false);
+        }
+        ~WatchedTokens() {
+            mChanges.watched.resize(mStart);
+        }
+        WatchedTokens(const WatchedTokens &) = delete;
+        WatchedTokens &operator=(const WatchedTokens &) = delete;
+
+        bool isDeleted(std::size_t i) const {
+            return mChanges.watched[mStart + i].second;
+        }
+    private:
+        TokenListChanges &mChanges;
+        std::size_t mStart;
+    };
+}
+
+// The '{' of the blocks that tok is in: from the '{' up to the '}', the '}' is not in it
+static std::unordered_set<const Token *> blocksContaining(const Token *tok, EnclosingBlocks &enclosing)
 {
-    for (const Token *t = block; tok && t != block->link(); t = t->next()) {
-        if (t == tok)
-            return true;
+    std::unordered_set<const Token *> blocks;
+    if (!tok)
+        return blocks;
+    const Token *block;
+    if (tok->str() == "{" && tok->link()) {
+        blocks.insert(tok);
+        block = enclosing.of(tok).block;
+    } else if (tok->str() == "}" && tok->link()) {
+        block = enclosing.of(tok->link()).block;
+    } else {
+        block = enclosing.of(tok).block;
     }
-    return false;
+    for (; block; block = enclosing.of(block).block)
+        blocks.insert(block);
+    return blocks;
 }
 #endif
 
@@ -1900,7 +2118,7 @@ void TemplateSimplifier::expandTemplate(
     const std::string &newName,
     bool copy)
 {
-    assert(blockSummariesAreValid(mTokenList.front(), mTemplateBlockNamesKnown));
+    assert(blockSummariesAreValid());
 
     // Does the template head that starts at head have as many parameters as the template that is
     // expanded (not in a partial specialization)
@@ -2204,6 +2422,29 @@ void TemplateSimplifier::expandTemplate(
         return tok->str() == "{" && tok->link() && !tok->blockNames().intersects(templateName);
     };
 
+#ifndef NDEBUG
+    // The blocks that contain the declaration or the added tokens are not skipped, the walk below
+    // passes the added tokens before the blocks after them. The blocks are looked up again when the
+    // recorded changes can have changed them; a deleted token is in no block.
+    WatchedTokens watched(mChangedTokens, {templateDeclarationToken, addedEnd});
+    std::unordered_set<const Token *> blocksNotToSkip;
+    bool blocksNotToSkipKnown = false;
+    std::size_t blocksNotToSkipChanges = 0;
+    const auto isBlockNotToSkip = [&](const Token *block) {
+        if (!blocksNotToSkipKnown || (mRecordingChanges && blocksNotToSkipChanges != mChangedTokens.blockChanges)) {
+            EnclosingBlocks enclosing(mTokenList.front());
+            blocksNotToSkip = blocksContaining(watched.isDeleted(0) ? nullptr : templateDeclarationToken, enclosing);
+            const std::unordered_set<const Token *> blocksWithAddedTokens = blocksContaining(watched.isDeleted(1) ? nullptr : addedEnd, enclosing);
+            blocksNotToSkip.insert(blocksWithAddedTokens.cbegin(), blocksWithAddedTokens.cend());
+            blocksNotToSkipKnown = true;
+            blocksNotToSkipChanges = mChangedTokens.blockChanges;
+        }
+        return blocksNotToSkip.count(block) != 0;
+    };
+    // looked up before the walk changes the tokens
+    (void)isBlockNotToSkip(nullptr);
+#endif
+
     std::vector<Token *> blocks; // the blocks that contain tok3
     for (Token *tok3 = mTokenList.front(); tok3; tok3 = tok3 ? tok3->next() : nullptr) {
         if (!blocks.empty() && tok3 == blocks.back()->link())
@@ -2216,7 +2457,7 @@ void TemplateSimplifier::expandTemplate(
         // Only the declaration and the member functions implemented outside of the class definition
         // (they are in a statement with "template") are of interest
         if (isBlockToSkip(tok3)) {
-            assert(!isInBlock(templateDeclarationToken, tok3) && !isInBlock(addedEnd, tok3));
+            assert(!isBlockNotToSkip(tok3));
             tok3 = tok3->link();
             continue;
         }
@@ -3816,7 +4057,7 @@ void TemplateSimplifier::replaceTemplateUsage(
     const std::string &newName)
 {
     std::list<std::pair<Token *, Token *>> removeTokens;
-    assert(blockSummariesAreValid(mTokenList.front(), mTemplateBlockNamesKnown));
+    assert(blockSummariesAreValid());
     const BlockNameSet names = nameBit(instantiation.name()) | nameBit(lastNameComponent(instantiation.fullName()));
     std::vector<Token *> blocks; // the blocks that contain nameTok
     for (Token *nameTok = mTokenList.front(); nameTok; nameTok = nameTok->next()) {
@@ -4226,6 +4467,28 @@ void TemplateSimplifier::printOut(const std::string & text) const
 
 void TemplateSimplifier::simplifyTemplates(const std::time_t maxtime)
 {
+#ifndef NDEBUG
+    // the changes of the tokens are recorded for blockSummariesAreValid()
+    class RecordChanges {
+    public:
+        explicit RecordChanges(TemplateSimplifier &simplifier) : mSimplifier(simplifier) {
+            mSimplifier.mTokenList.recordChangedTokens(&mSimplifier.mChangedTokens);
+            mSimplifier.mRecordingChanges = true;
+        }
+        ~RecordChanges() {
+            mSimplifier.mTokenList.recordChangedTokens(nullptr);
+            mSimplifier.mRecordingChanges = false;
+            mSimplifier.mBlockSummariesChecked = false;
+            mSimplifier.mChangedTokens.tokens.clear();
+            mSimplifier.mChangedTokens.blocks.clear();
+        }
+        RecordChanges(const RecordChanges &) = delete;
+        RecordChanges &operator=(const RecordChanges &) = delete;
+    private:
+        TemplateSimplifier &mSimplifier;
+    } recordChanges(*this);
+#endif
+
     // convert "sizeof ..." to "sizeof..."
     for (Token *tok = mTokenList.front(); tok; tok = tok->next()) {
         if (Token::simpleMatch(tok, "sizeof ...")) {
