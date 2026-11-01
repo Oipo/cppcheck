@@ -790,13 +790,17 @@ void TemplateSimplifier::addInstantiation(Token *token, const std::string &scope
 
     TokenAndName instantiation(token, scope);
 
-    // check if instantiation already exists before adding it
-    const auto it = std::find(mTemplateInstantiations.cbegin(),
-                              mTemplateInstantiations.cend(),
-                              instantiation);
+    // check if instantiation already exists before adding it, the instantiations of token are in its
+    // pointers
+    const std::set<TokenAndName *> *pointers = token->templateSimplifierPointers();
+    const bool exists = pointers && std::any_of(pointers->cbegin(), pointers->cend(), [&](const TokenAndName *p) {
+        return p->isInInstantiations() && *p == instantiation;
+    });
 
-    if (it == mTemplateInstantiations.cend())
+    if (!exists) {
         mTemplateInstantiations.emplace_back(std::move(instantiation));
+        mTemplateInstantiations.back().instantiationNumber(++mInstantiationCount);
+    }
 }
 
 static const Token* getFunctionToken(const Token* nameToken)
@@ -1123,14 +1127,19 @@ void TemplateSimplifier::getTemplateInstantiations()
 
 void TemplateSimplifier::useDefaultArgumentValues()
 {
+    std::unordered_map<std::string, std::vector<const TokenAndName *>> instantiationsByFullName;
+    for (const TokenAndName &instantiation : mTemplateInstantiations)
+        instantiationsByFullName[instantiation.fullName()].push_back(&instantiation);
+
     for (TokenAndName &declaration : mTemplateDeclarations)
-        useDefaultArgumentValues(declaration);
+        useDefaultArgumentValues(declaration, instantiationsByFullName);
 
     for (TokenAndName &declaration : mTemplateForwardDeclarations)
-        useDefaultArgumentValues(declaration);
+        useDefaultArgumentValues(declaration, instantiationsByFullName);
 }
 
-void TemplateSimplifier::useDefaultArgumentValues(TokenAndName &declaration)
+void TemplateSimplifier::useDefaultArgumentValues(TokenAndName &declaration,
+                                                  std::unordered_map<std::string, std::vector<const TokenAndName *>> &instantiationsByFullName)
 {
     // Ticket #5762: Skip specialization tokens
     if (declaration.isSpecialization() || declaration.isAlias() || declaration.isFriend())
@@ -1210,10 +1219,10 @@ void TemplateSimplifier::useDefaultArgumentValues(TokenAndName &declaration)
     if (eq.empty())
         return;
 
-    // iterate through all template instantiations
-    for (const TokenAndName &instantiation : mTemplateInstantiations) {
-        if (declaration.fullName() != instantiation.fullName())
-            continue;
+    // iterate through the template instantiations with the full name of the declaration
+    const std::vector<const TokenAndName *> &sameFullName = instantiationsByFullName[declaration.fullName()];
+    for (const TokenAndName *instantiationPtr : sameFullName) {
+        const TokenAndName &instantiation = *instantiationPtr;
 
         // instantiation arguments..
         std::vector<std::vector<const Token *>> instantiationArgs;
@@ -1333,8 +1342,11 @@ void TemplateSimplifier::useDefaultArgumentValues(TokenAndName &declaration)
                 const auto ti = std::find_if(mTemplateInstantiations.cbegin(),
                                              mTemplateInstantiations.cend(),
                                              FindToken(tok2));
-                if (ti != mTemplateInstantiations.end())
+                if (ti != mTemplateInstantiations.end()) {
+                    std::vector<const TokenAndName *> &sameName = instantiationsByFullName[ti->fullName()];
+                    sameName.erase(std::find(sameName.begin(), sameName.end(), &*ti));
                     mTemplateInstantiations.erase(ti);
+                }
                 ++indentlevel;
             } else if (indentlevel > 0 && tok2->str() == ">")
                 --indentlevel;
@@ -2902,8 +2914,10 @@ void TemplateSimplifier::expandTemplate(
         simplifyTemplateArgs(inst.token->tokAt(2), inst.token->next()->findClosingBracket(), &newInstantiations);
         // only add recursive instantiation if its arguments are a constant expression
         if (templateDeclaration.name() != inst.token->str() ||
-            (inst.token->tokAt(2)->isNumber() || inst.token->tokAt(2)->isStandardType()))
+            (inst.token->tokAt(2)->isNumber() || inst.token->tokAt(2)->isStandardType())) {
             mTemplateInstantiations.emplace_back(inst.token, inst.scope);
+            mTemplateInstantiations.back().instantiationNumber(++mInstantiationCount);
+        }
     }
 
     // the blocks of the copy are summarized when they are passed above, before their arguments
@@ -3745,6 +3759,11 @@ bool TemplateSimplifier::simplifyTemplateInstantiations(
             }
         }
 
+        // only an instantiation with the name or the full name of the declaration is used below, the
+        // names are compared before the token is looked at
+        if (instantiation.name() != templateDeclaration.name() && instantiation.fullName() != templateDeclaration.fullName())
+            continue;
+
         // already simplified
         if (!Token::Match(instantiation.token(), "%name% <"))
             continue;
@@ -4006,9 +4025,17 @@ void TemplateSimplifier::moveInstantiationsInArguments(const Token *nameTok, con
             copyTok = copyTok->next();
         if (!tok->isName() || !tok->templateSimplifierPointers() || tok->templateSimplifierPointers()->empty())
             continue;
-        for (TokenAndName &instantiation : mTemplateInstantiations) {
-            if (instantiation.token() != tok)
-                continue;
+        // the instantiations of tok are in its pointers, they are looked at in the order of the list
+        std::vector<TokenAndName *> instantiations;
+        for (TokenAndName *p : *tok->templateSimplifierPointers()) {
+            if (p->isInInstantiations())
+                instantiations.push_back(p);
+        }
+        std::sort(instantiations.begin(), instantiations.end(), [](const TokenAndName *a, const TokenAndName *b) {
+            return a->instantiationNumber() < b->instantiationNumber();
+        });
+        for (TokenAndName *instantiationPtr : instantiations) {
+            TokenAndName &instantiation = *instantiationPtr;
             if (!isCopiedKnown) {
                 isCopiedKnown = true;
                 std::string key = instantiation.scope() + " :";

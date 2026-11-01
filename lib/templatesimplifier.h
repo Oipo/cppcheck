@@ -24,6 +24,7 @@
 
 #include "config.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <ctime>
 #include <list>
@@ -96,6 +97,9 @@ public:
         const Token *mNameToken;
         const Token *mParamEnd;
         unsigned int mFlags;
+        /** the number of an instantiation in mTemplateInstantiations, in the order of the list, 0 when
+         * it is not in the list (a copy is not) */
+        std::size_t mInstantiationNumber{};
 
         enum : std::uint16_t {
             fIsClass                 = (1 << 0), // class template
@@ -173,6 +177,7 @@ public:
          */
         TokenAndName(Token *token, std::string scope, const Token *nameToken, const Token *paramEnd);
         TokenAndName(const TokenAndName& other);
+        TokenAndName& operator=(const TokenAndName&) = delete;
         ~TokenAndName();
 
         bool operator == (const TokenAndName & rhs) const {
@@ -206,6 +211,15 @@ public:
         }
         void paramEnd(const Token *end) {
             mParamEnd = end;
+        }
+        bool isInInstantiations() const {
+            return mInstantiationNumber != 0;
+        }
+        std::size_t instantiationNumber() const {
+            return mInstantiationNumber;
+        }
+        void instantiationNumber(std::size_t number) {
+            mInstantiationNumber = number;
         }
 
         bool isClass() const {
@@ -389,8 +403,11 @@ private:
     /**
      * simplify template instantiations (use default argument values)
      * @param declaration template declaration or forward declaration
+     * @param instantiationsByFullName the instantiations in mTemplateInstantiations by their full
+     * names, in the order of the list
      */
-    void useDefaultArgumentValues(TokenAndName &declaration);
+    void useDefaultArgumentValues(TokenAndName &declaration,
+                                  std::unordered_map<std::string, std::vector<const TokenAndName *>> &instantiationsByFullName);
 
     /**
      * Try to locate a matching declaration for each user defined
@@ -543,6 +560,8 @@ private:
     std::map<const Token *, Token *> mTemplateSpecializationMap;
     std::map<const Token *, Token *> mTemplatePartialSpecializationMap;
     std::list<TokenAndName> mTemplateInstantiations;
+    /** the number of the last instantiation that was added to mTemplateInstantiations */
+    std::size_t mInstantiationCount{};
     std::list<TokenAndName> mInstantiatedTemplates;
     std::list<TokenAndName> mMemberFunctionsToDelete;
     std::vector<TokenAndName> mExplicitInstantiationsToDelete;

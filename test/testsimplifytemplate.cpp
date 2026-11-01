@@ -333,6 +333,7 @@ private:
 
         TEST_CASE(templateUsageInBlocks); // blocks that are skipped when looking for template usage
         TEST_CASE(templateUsageInDeepBlocks); // stack overflow when looking for the blocks that enclose a token
+        TEST_CASE(templateInstantiationsInArguments);
         TEST_CASE(templateMemberTemplateOutOfLine);
         TEST_CASE(templateTemplateParameterOutOfLine);
         TEST_CASE(templateMemberOfMemberTemplateOutOfLine);
@@ -7057,6 +7058,27 @@ private:
         ASSERT_EQUALS(0U, out.find("void g<int> ( int ) ; void g<char> ( char ) ; void g<long> ( long ) ; void f ( ) {"));
         ASSERT(out.find("void f ( ) { g<int> ( 1 ) ; g<char> ( 'a' ) ; { g<long> ( 2L ) ; } }") != std::string::npos);
         ASSERT(out.find("void g<int> ( int ) { } void g<char> ( char ) { } void g<long> ( long ) { }") != std::string::npos);
+    }
+
+    void templateInstantiationsInArguments() {
+        // a token that is an instantiation in more than one scope
+        const char code1[] = "template<class T> struct B { T b; };\n"
+                             "template<class T> struct A { T a; };\n"
+                             "namespace N { A<B<int>> x; }\n"
+                             "A<B<int>> y;\n";
+        ASSERT_EQUALS("struct B<int> ; struct A<B<int>> ; namespace N { A<B<int>> x ; } A<B<int>> y ; struct A<B<int>> { B<int> a ; } ; struct B<int> { int b ; } ;",
+                      tok(code1));
+
+        // main instantiates B<int> before B<char>
+        const char code2[] = "template<class T> struct B { T b; };\n"
+                             "template<class T, class U> struct A { T a; U u; };\n"
+                             "namespace N { namespace M { A<B<int>, B<char>> x; } A<B<char>, B<int>> y; }\n"
+                             "A<B<int>, B<char>> z;\n";
+        ASSERT_EQUALS("struct B<char> ; struct B<int> ; struct A<B<int>,B<char>> ; struct A<B<char>,B<int>> ; "
+                      "namespace N { namespace M { A<B<int>,B<char>> x ; } A<B<char>,B<int>> y ; } A<B<int>,B<char>> z ; "
+                      "struct A<B<int>,B<char>> { B<int> a ; B<char> u ; } ; struct A<B<char>,B<int>> { B<char> a ; B<int> u ; } ; "
+                      "struct B<char> { char b ; } ; struct B<int> { int b ; } ;",
+                      tok(code2));
     }
 
     void templateUsageInBlocks() {
