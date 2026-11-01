@@ -1744,21 +1744,21 @@ static std::string lastNameComponent(const std::string &name)
     return pos == std::string::npos ? name : name.substr(pos + 4);
 }
 
-static std::uint64_t nameBit(const std::string &name)
+static BlockNameSet nameBit(const std::string &name)
 {
-    return std::uint64_t{1} << (std::hash<std::string>{}(name) % 64);
+    return BlockNameSet::ofHash(std::hash<std::string>{}(name));
 }
 
 // The bits for the instantiations that replaceTemplateUsage() can match with tok: the string of
 // tok, or a full name of a TokenAndName of tok. An instantiation gets its name from its token,
 // and the last component of its full name is the last component of its name.
-static std::uint64_t nameBits(const Token *tok)
+static BlockNameSet nameBits(const Token *tok)
 {
-    const std::uint64_t bits = nameBit(tok->str()) | nameBit(lastNameComponent(tok->str()));
+    const BlockNameSet bits = nameBit(tok->str()) | nameBit(lastNameComponent(tok->str()));
     const auto *pointers = tok->templateSimplifierPointers();
     if (!pointers)
         return bits;
-    return std::accumulate(pointers->cbegin(), pointers->cend(), bits, [](std::uint64_t b, const TemplateSimplifier::TokenAndName *p) {
+    return std::accumulate(pointers->cbegin(), pointers->cend(), bits, [](const BlockNameSet &b, const TemplateSimplifier::TokenAndName *p) {
         return b | nameBit(lastNameComponent(p->fullName()));
     });
 }
@@ -1772,12 +1772,12 @@ static void forEachBlockSummary(T *start, const Token *end, const F &f)
     struct Block {
         T *start;
         bool hasTemplate;
-        std::uint64_t names;
+        BlockNameSet names;
     };
     std::vector<Block> blocks;
     for (T *tok = start; tok != end; tok = tok->next()) {
         if (tok->str() == "{" && tok->link()) {
-            blocks.push_back({tok, false, 0});
+            blocks.push_back({tok, false, {}});
             continue;
         }
         if (blocks.empty())
@@ -1802,7 +1802,7 @@ static void forEachBlockSummary(T *start, const Token *end, const F &f)
 // For the blocks from start up to end, remember what can be skipped when looking for something
 static void summarizeBlocks(Token *start, const Token *end)
 {
-    forEachBlockSummary(start, end, [](Token *block, bool hasTemplate, std::uint64_t names) {
+    forEachBlockSummary(start, end, [](Token *block, bool hasTemplate, const BlockNameSet &names) {
         templateInBlock(block, hasTemplate ? TemplateInBlock::Yes : TemplateInBlock::No);
         block->blockNames(names);
     });
@@ -1814,11 +1814,11 @@ static void summarizeBlocks(Token *start, const Token *end)
 static bool blockSummariesAreValid(const Token *start, bool namesKnown)
 {
     bool valid = true;
-    forEachBlockSummary(start, nullptr, [&](const Token *block, bool hasTemplate, std::uint64_t names) {
+    forEachBlockSummary(start, nullptr, [&](const Token *block, bool hasTemplate, const BlockNameSet &names) {
         const TemplateInBlock t = templateInBlock(block);
         if (t == TemplateInBlock::No && hasTemplate)
             valid = false;
-        if ((t == TemplateInBlock::No || (t == TemplateInBlock::Yes && namesKnown)) && (names & ~block->blockNames()) != 0)
+        if ((t == TemplateInBlock::No || (t == TemplateInBlock::Yes && namesKnown)) && !block->blockNames().includes(names))
             valid = false;
     });
     return valid;
@@ -1830,7 +1830,7 @@ static void addNamesToBlocks(const Token *start, const Token *end, const std::ve
 {
     if (blocks.empty())
         return;
-    std::uint64_t names = 0;
+    BlockNameSet names;
     for (const Token *tok = start; tok; tok = tok->next()) {
         if (Token::simpleMatch(tok->next(), "<"))
             names |= nameBits(tok);
@@ -2197,11 +2197,11 @@ void TemplateSimplifier::expandTemplate(
     // declaration at its "template <". When mTemplateBlockNamesKnown is false, the names of the
     // forward declarations that were added before a "template" are missing in the blocks that contain
     // them, but there is no "template" in them.
-    const std::uint64_t templateName = nameBit(templateDeclaration.name());
+    const BlockNameSet templateName = nameBit(templateDeclaration.name());
     const auto isBlockToSkip = [&](Token *tok) {
         if (isBlockWithoutTemplate(tok))
             return true;
-        return tok->str() == "{" && tok->link() && (tok->blockNames() & templateName) == 0;
+        return tok->str() == "{" && tok->link() && !tok->blockNames().intersects(templateName);
     };
 
     std::vector<Token *> blocks; // the blocks that contain tok3
@@ -3817,14 +3817,14 @@ void TemplateSimplifier::replaceTemplateUsage(
 {
     std::list<std::pair<Token *, Token *>> removeTokens;
     assert(blockSummariesAreValid(mTokenList.front(), mTemplateBlockNamesKnown));
-    const std::uint64_t names = nameBit(instantiation.name()) | nameBit(lastNameComponent(instantiation.fullName()));
+    const BlockNameSet names = nameBit(instantiation.name()) | nameBit(lastNameComponent(instantiation.fullName()));
     std::vector<Token *> blocks; // the blocks that contain nameTok
     for (Token *nameTok = mTokenList.front(); nameTok; nameTok = nameTok->next()) {
         if (!blocks.empty() && nameTok == blocks.back()->link()) {
             blocks.pop_back();
         } else if (nameTok->str() == "{" && nameTok->link()) {
             summarizeBlock(nameTok);
-            if ((nameTok->blockNames() & names) == 0 &&
+            if (!nameTok->blockNames().intersects(names) &&
                 (mTemplateBlockNamesKnown || templateInBlock(nameTok) == TemplateInBlock::No)) {
                 nameTok = nameTok->link();
                 continue;

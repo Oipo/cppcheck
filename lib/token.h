@@ -30,6 +30,7 @@
 #include "vfvalue.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <cstddef>
@@ -68,6 +69,60 @@ enum class TokenDebug : std::uint8_t { None, ValueFlow, ValueType };
 
 /// @addtogroup Core
 /// @{
+
+/**
+ * @brief Names in a block, to skip the block when looking for a name: a name sets one of 256 bits,
+ * chosen by its hash (a Bloom filter with one hash function).
+ */
+class BlockNameSet {
+public:
+    static BlockNameSet ofHash(std::size_t hash) {
+        BlockNameSet names;
+        names.mBits[(hash / 64) % words] = std::uint64_t{1} << (hash % 64);
+        return names;
+    }
+    /** a set that has all names */
+    static BlockNameSet all() {
+        BlockNameSet names;
+        names.mBits.fill(~std::uint64_t{0});
+        return names;
+    }
+
+    BlockNameSet &operator|=(const BlockNameSet &other) {
+        for (std::size_t i = 0; i < words; ++i)
+            mBits[i] |= other.mBits[i];
+        return *this;
+    }
+    friend BlockNameSet operator|(BlockNameSet lhs, const BlockNameSet &rhs) {
+        return lhs |= rhs;
+    }
+    /** can a name be in both sets */
+    bool intersects(const BlockNameSet &other) const {
+        for (std::size_t i = 0; i < words; ++i) {
+            if ((mBits[i] & other.mBits[i]) != 0)
+                return true;
+        }
+        return false;
+    }
+    /** are all names of other in this set */
+    bool includes(const BlockNameSet &other) const {
+        for (std::size_t i = 0; i < words; ++i) {
+            if ((other.mBits[i] & ~mBits[i]) != 0)
+                return false;
+        }
+        return true;
+    }
+
+private:
+    static constexpr std::size_t words = 4;
+    std::array<std::uint64_t, words> mBits{};
+};
+
+/** The summary of the block that starts at a '{', see Token::blockSummary() */
+struct BlockSummaryData {
+    std::uint8_t summary{};
+    BlockNameSet names;
+};
 
 /**
  * @brief The token list that the TokenList generates is a linked-list of this class.
@@ -114,9 +169,9 @@ private:
 
         /** A summary of the block that starts at this '{', to skip the block when looking for
             something. TemplateSimplifier, Tokenizer::simplifyTypedefCpp() and
-            Tokenizer::simplifyUsing() compute it for all blocks before they use it. */
-        std::uint8_t mBlockSummary{};
-        std::uint64_t mBlockNames{};
+            Tokenizer::simplifyUsing() compute it for all blocks before they use it. Only the '{'
+            tokens have it, so the other tokens do not pay for its size. */
+        std::unique_ptr<BlockSummaryData> mBlockSummary;
 
         // AST..
         Token* mAstOperand1{};
@@ -1333,17 +1388,28 @@ public:
 
     /** A summary of the block that starts at this '{', 0 when it is not known */
     std::uint8_t blockSummary() const {
-        return mImpl->mBlockSummary;
+        return mImpl->mBlockSummary ? mImpl->mBlockSummary->summary : 0;
     }
     void blockSummary(std::uint8_t summary) {
-        mImpl->mBlockSummary = summary;
+        if (!mImpl->mBlockSummary) {
+            if (summary == 0)
+                return;
+            mImpl->mBlockSummary.reset(new BlockSummaryData);
+        }
+        mImpl->mBlockSummary->summary = summary;
     }
-    /** Bits for names in the block that starts at this '{' */
-    std::uint64_t blockNames() const {
-        return mImpl->mBlockNames;
+    /** The names in the block that starts at this '{' */
+    const BlockNameSet &blockNames() const {
+        static const BlockNameSet noNames;
+        return mImpl->mBlockSummary ? mImpl->mBlockSummary->names : noNames;
     }
-    void blockNames(std::uint64_t names) {
-        mImpl->mBlockNames = names;
+    void blockNames(const BlockNameSet &names) {
+        if (!mImpl->mBlockSummary) {
+            if (BlockNameSet().includes(names))
+                return;
+            mImpl->mBlockSummary.reset(new BlockSummaryData);
+        }
+        mImpl->mBlockSummary->names = names;
     }
 
     /** Get progressValue (0 - 100) */

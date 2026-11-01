@@ -1067,9 +1067,9 @@ bool Tokenizer::isFunctionPointer(const Token* tok) {
 // skipped after the block
 enum BlockSummary : std::uint8_t { BlockUnknown, BlockNames, BlockScope };
 
-static std::uint64_t blockNameBit(const std::string &name)
+static BlockNameSet blockNameBit(const std::string &name)
 {
-    return std::uint64_t{1} << (std::hash<std::string>{}(name) % 64);
+    return BlockNameSet::ofHash(std::hash<std::string>{}(name));
 }
 
 static bool matchCurrentType(const Token* tok, std::map<int, std::string>& types)
@@ -1274,12 +1274,12 @@ void Tokenizer::simplifyTypedefCpp()
         struct Block {
             Token *start;
             bool scope;
-            std::uint64_t names;
+            BlockNameSet names;
         };
         std::vector<Block> blocks;
         for (Token *tok = start; tok != end; tok = tok->next()) {
             if (tok->str() == "{" && tok->link()) {
-                blocks.push_back({tok, false, 0});
+                blocks.push_back({tok, false, {}});
                 continue;
             }
             if (blocks.empty())
@@ -1838,7 +1838,7 @@ void Tokenizer::simplifyTypedefCpp()
                 spaceInfo[i].bodyEnd2 = spaceInfo[i].bodyEnd;
             }
             // a typedef that is added after the names are collected is looked for in all blocks
-            const std::uint64_t nameBit = typedefNames.count(typeName->str()) != 0 ? blockNameBit(typeName->str()) : ~std::uint64_t{0};
+            const BlockNameSet nameBit = typedefNames.count(typeName->str()) != 0 ? blockNameBit(typeName->str()) : BlockNameSet::all();
             std::vector<Token *> blocks; // the blocks that contain tok2, and blocks whose end is skipped
 
             for (Token *tok2 = tok; tok2; tok2 = tok2->next()) {
@@ -1974,7 +1974,7 @@ void Tokenizer::simplifyTypedefCpp()
                             summarizeBlocks(tok2, tok2->link()->next());
                         // skip the block when there is nothing to see in it, the end of the block is seen
                         // (a ';' in a block in a typedef ends the typedef)
-                        if (!inTypeDef && tok2->blockSummary() == BlockNames && (tok2->blockNames() & nameBit) == 0)
+                        if (!inTypeDef && tok2->blockSummary() == BlockNames && !tok2->blockNames().intersects(nameBit))
                             tok2 = tok2->link()->previous();
                     }
                 }
@@ -3191,12 +3191,12 @@ bool Tokenizer::simplifyUsing()
         struct Block {
             Token *start;
             bool scope;
-            std::uint64_t names;
+            BlockNameSet names;
         };
         std::vector<Block> blocks;
         for (Token *tok = start; tok != end; tok = tok->next()) {
             if (tok->str() == "{" && tok->link()) {
-                blocks.push_back({tok, false, 0});
+                blocks.push_back({tok, false, {}});
                 continue;
             }
             if (blocks.empty())
@@ -3446,7 +3446,7 @@ bool Tokenizer::simplifyUsing()
             }
             summarizeBlocks(list.front(), nullptr);
         }
-        const std::uint64_t nameBit = usingNames.count(nameToken->str()) != 0 ? blockNameBit(nameToken->str()) : ~std::uint64_t{0};
+        const BlockNameSet nameBit = usingNames.count(nameToken->str()) != 0 ? blockNameBit(nameToken->str()) : BlockNameSet::all();
         std::vector<Token *> blocks; // the blocks that contain tok1
         // the scopes of the member functions, findScope() only finds records so they can change when a record is added
         std::map<std::pair<const ScopeInfo3 *, std::string>, const ScopeInfo3 *> memberFunctionScopes;
@@ -3485,7 +3485,7 @@ bool Tokenizer::simplifyUsing()
                     if (tok1->blockSummary() == BlockUnknown)
                         summarizeBlocks(tok1, tok1->link()->next());
                     // skip the block when there is nothing to see in it, the end of the block is seen
-                    if (tok1->blockSummary() == BlockNames && (tok1->blockNames() & nameBit) == 0 &&
+                    if (tok1->blockSummary() == BlockNames && !tok1->blockNames().intersects(nameBit) &&
                         (!memberFuncEnd || memberFuncEnd == endToken || memberFuncEnd->str() == "}"))
                         tok1 = tok1->link()->previous();
                 } else if (!blocks.empty() && tok1 == blocks.back()->link()) {

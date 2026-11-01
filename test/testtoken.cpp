@@ -133,6 +133,9 @@ private:
         TEST_CASE(update_property_info_replace); // #13743
 
         TEST_CASE(varid_reset);
+
+        TEST_CASE(blockNameSet);
+        TEST_CASE(blockSummaryStorage);
     }
 
     void nextprevious() const {
@@ -1514,6 +1517,90 @@ private:
         tok.varId(0);
         assert_tok(&tok, Token::Type::eType, /*l=*/ false, /*std=*/ true);
     }
+    void blockNameSet() const {
+        const BlockNameSet empty;
+        const BlockNameSet all = BlockNameSet::all();
+        ASSERT(empty.includes(empty));
+        ASSERT(all.includes(empty));
+        ASSERT(!empty.includes(all));
+        ASSERT(!empty.intersects(all));
+
+        // each of the first 256 hashes sets its own bit, in all four words
+        std::vector<BlockNameSet> bits;
+        BlockNameSet allBits;
+        for (std::size_t hash = 0; hash < 256; ++hash) {
+            const BlockNameSet names = BlockNameSet::ofHash(hash);
+            ASSERT(!empty.includes(names));
+            ASSERT(all.includes(names));
+            ASSERT(names.intersects(all));
+            ASSERT(names.includes(names));
+            ASSERT(!names.includes(all));
+            // a hash that differs by 256 sets the same bit
+            ASSERT(names.includes(BlockNameSet::ofHash(hash + 256)));
+            for (const BlockNameSet &other : bits) {
+                ASSERT(!names.intersects(other));
+                ASSERT(!names.includes(other));
+            }
+            bits.push_back(names);
+            allBits |= names;
+        }
+        ASSERT(allBits.includes(all));
+
+        const BlockNameSet two = bits[3] | bits[200];
+        ASSERT(two.includes(bits[3]));
+        ASSERT(two.includes(bits[200]));
+        ASSERT(!bits[3].includes(two));
+        ASSERT(two.intersects(bits[200]));
+        ASSERT(!two.intersects(bits[4]));
+        ASSERT(!two.intersects(bits[136]));
+    }
+
+    void blockSummaryStorage() const {
+        auto tokensFrontBack = std::make_shared<TokensFrontBack>();
+        auto *open = new Token(list, std::move(tokensFrontBack));
+        open->str("{");
+        Token *name = open->insertToken("x");
+
+        // no summary is stored until there is one
+        ASSERT_EQUALS(0, static_cast<int>(open->blockSummary()));
+        ASSERT(BlockNameSet().includes(open->blockNames()));
+        open->blockSummary(0);
+        open->blockNames(BlockNameSet());
+        ASSERT_EQUALS(0, static_cast<int>(open->blockSummary()));
+        ASSERT(BlockNameSet().includes(open->blockNames()));
+
+        open->blockSummary(5);
+        ASSERT_EQUALS(5, static_cast<int>(open->blockSummary()));
+        ASSERT(BlockNameSet().includes(open->blockNames()));
+
+        const BlockNameSet names = BlockNameSet::ofHash(7) | BlockNameSet::ofHash(100);
+        open->blockNames(names);
+        ASSERT(names.includes(open->blockNames()));
+        ASSERT(open->blockNames().includes(names));
+        ASSERT_EQUALS(5, static_cast<int>(open->blockSummary()));
+
+        // the summary is reset, the names stay
+        open->blockSummary(0);
+        ASSERT_EQUALS(0, static_cast<int>(open->blockSummary()));
+        ASSERT(open->blockNames().includes(names));
+        open->blockSummary(3);
+
+        ASSERT_EQUALS(0, static_cast<int>(name->blockSummary()));
+        ASSERT(BlockNameSet().includes(name->blockNames()));
+
+        // the summary moves with the string
+        open->swapWithNext();
+        ASSERT_EQUALS("x", open->str());
+        ASSERT_EQUALS(0, static_cast<int>(open->blockSummary()));
+        ASSERT(BlockNameSet().includes(open->blockNames()));
+        ASSERT_EQUALS("{", name->str());
+        ASSERT_EQUALS(3, static_cast<int>(name->blockSummary()));
+        ASSERT(name->blockNames().includes(names));
+        ASSERT(names.includes(name->blockNames()));
+
+        TokenList::deleteTokens(open);
+    }
+
 #undef assert_tok
 };
 
