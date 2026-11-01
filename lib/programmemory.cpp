@@ -533,7 +533,16 @@ static ProgramMemory getInitialProgramState(const Token* tok,
 ProgramMemoryState::ProgramMemoryState(const Settings& s) : settings(s), changedCache(std::make_shared<ChangedCache>())
 {}
 
-void ProgramMemoryState::replace(ProgramMemory pm, const Token* origin)
+ProgramMemoryState::ProgramMemoryState(const ProgramMemoryState& other)
+    : settings(other.settings)
+{
+    other.addPendingState();
+    state = other.state;
+    origins = other.origins;
+    changedCache = other.changedCache;
+}
+
+void ProgramMemoryState::replace(ProgramMemory pm, const Token* origin) const
 {
     if (origin)
         for (const auto& p : pm)
@@ -551,6 +560,88 @@ static void addVars(ProgramMemory& pm, const ProgramMemory::Map& vars)
 
 void ProgramMemoryState::addState(const Token* tok, const ProgramMemory::Map& vars)
 {
+    addPendingState();
+    addStateNow(tok, vars);
+}
+
+#ifndef NDEBUG
+static bool isSameState(const ProgramMemory& pm1, const ProgramMemory& pm2)
+{
+    auto it2 = pm2.begin();
+    for (auto it1 = pm1.begin(); it1 != pm1.end(); ++it1, ++it2) {
+        if (it2 == pm2.end() || it1->first.getExpressionId() != it2->first.getExpressionId() || !(it1->second == it2->second))
+            return false;
+    }
+    return it2 == pm2.end();
+}
+#endif
+
+// Can addState() at tok read lifetime values: only findExpressionChanged() reads them (isAliasOf()),
+
+// for the conditions of the scopes that fillProgramMemoryFromConditions() looks at
+static bool readsLifetimeValues(const Token* tok)
+{
+    for (const Scope* scope = tok->scope(); scope && scope->isLocal(); scope = scope->nestedIn) {
+        if (scope->type == ScopeType::eIf || scope->type == ScopeType::eWhile || scope->type == ScopeType::eElse || scope->type == ScopeType::eFor)
+            return true;
+    }
+    return false;
+}
+
+bool ProgramMemoryState::compareDeferredStates = false;
+
+void ProgramMemoryState::addStateLater(const Token* tok, const ProgramMemory::Map& vars)
+{
+    addPendingState();
+    pendingTok = tok;
+    pendingVars = vars;
+    pendingReadsLifetimeValues = readsLifetimeValues(tok);
+#ifndef NDEBUG
+    if (compareDeferredStates) {
+        // the state that addState() computes now, with a copy of the memo so that it does not change
+        // what the later addState() finds
+        ProgramMemoryState now(settings);
+        now.state = state;
+        now.origins = origins;
+        now.changedCache = std::make_shared<ChangedCache>(*changedCache);
+        now.addStateNow(tok, vars);
+        pendingCheck = std::make_shared<std::pair<ProgramMemory, std::map<nonneg int, const Token*>>>(now.state, now.origins);
+    }
+#endif
+}
+
+void ProgramMemoryState::beforeSetLifetimeValue(const Token* tok) const
+{
+    if (!pendingTok || !pendingReadsLifetimeValues)
+        return;
+    // setTokenValue() sets a lifetime value on tok and on some of its parents
+    for (const Token* t = tok; t; t = t->astParent()) {
+        if (!precedes(pendingTok, t)) {
+            addPendingState();
+            return;
+        }
+    }
+}
+
+void ProgramMemoryState::addPendingState() const
+{
+    if (!pendingTok)
+        return;
+    const Token* const tok = pendingTok;
+    pendingTok = nullptr;
+    ProgramMemory::Map vars;
+    vars.swap(pendingVars);
+    addStateNow(tok, vars);
+#ifndef NDEBUG
+    if (pendingCheck) {
+        assert(isSameState(state, pendingCheck->first) && origins == pendingCheck->second);
+        pendingCheck.reset();
+    }
+#endif
+}
+
+void ProgramMemoryState::addStateNow(const Token* tok, const ProgramMemory::Map& vars) const
+{
     ProgramMemory local = state;
     addVars(local, vars);
     fillProgramMemoryFromConditions(local, tok, settings, getCachedFindExpressionChanged(/*skipDeadCode*/ false));
@@ -563,6 +654,7 @@ void ProgramMemoryState::addState(const Token* tok, const ProgramMemory::Map& va
 
 void ProgramMemoryState::assume(const Token* tok, bool b, bool isEmpty, const Token* origin)
 {
+    addPendingState();
     ProgramMemory pm = state;
     if (isEmpty)
         pm.setContainerSizeValue(tok, 0, b);
@@ -583,6 +675,7 @@ void ProgramMemoryState::assume(const Token* tok, bool b, bool isEmpty, const To
 
 ProgramMemoryState::FindChangedFn ProgramMemoryState::getCachedFindExpressionChanged(bool skipDeadCode) const
 {
+    addPendingState();
     // Structural findExpressionChanged() is pure, so memoize it in changedCache (never invalidated).
     // skipDeadCode adds the dead-code walk; it evaluates guards against a fixed state snapshot (so every
     // variable follows the same path) and memoizes those evals in evalCache for the closure's lifetime.
@@ -634,6 +727,7 @@ ProgramMemoryState::FindChangedFn ProgramMemoryState::getCachedFindExpressionCha
 
 void ProgramMemoryState::removeModifiedVars(const Token* tok)
 {
+    addPendingState();
     const auto findChanged = getCachedFindExpressionChanged(/*skipDeadCode*/ true);
     state.erase_if([&](const ExprIdToken& e) {
         const Token* start = origins[e.getExpressionId()];
@@ -647,6 +741,7 @@ void ProgramMemoryState::removeModifiedVars(const Token* tok)
 
 ProgramMemory ProgramMemoryState::get(const Token* tok, const Token* ctx, const ProgramMemory::Map& vars) const
 {
+    addPendingState();
     ProgramMemoryState local = *this;
     if (ctx)
         local.addState(ctx, vars);

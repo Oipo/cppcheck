@@ -183,17 +183,33 @@ struct ProgramMemoryState {
     // returns), or nullptr.
     using FindChangedFn = std::function<const Token*(const Token* expr, const Token* start, const Token* end)>;
 
-    ProgramMemory state;
-    std::map<nonneg int, const Token*> origins;
+    // mutable for the addState() that is done when the state is used, see addStateLater()
+    mutable ProgramMemory state;
+    mutable std::map<nonneg int, const Token*> origins;
     const Settings& settings;
     // Memoized findExpressionChanged() pre-filter; structural, so never invalidated.
     std::shared_ptr<ChangedCache> changedCache;
 
     explicit ProgramMemoryState(const Settings& s);
-
-    void replace(ProgramMemory pm, const Token* origin = nullptr);
+    // the pending addState() of other is done first, so that the copies do not depend on when they
+    // do it
+    ProgramMemoryState(const ProgramMemoryState& other);
 
     void addState(const Token* tok, const ProgramMemory::Map& vars);
+
+    // addState() when the state is used next, the program memory is not computed when it is not
+    // used. addState() reads the values of the tokens up to tok (findExpressionChanged() reads their
+    // lifetime values), so only lifetime values may be set on the tokens until then, and each one
+    // must be announced with beforeSetLifetimeValue().
+    void addStateLater(const Token* tok, const ProgramMemory::Map& vars);
+
+    // A lifetime value is set on tok and possibly on its parents: the pending addState() is done
+    // first when one of them is not after its token.
+    void beforeSetLifetimeValue(const Token* tok) const;
+
+    // In builds with assertions: assert that the state that addStateLater() computes later is the
+    // state that addState() would have computed. It is slow, the testrunner turns it on.
+    static bool compareDeferredStates;
 
     void assume(const Token* tok, bool b, bool isEmpty = false, const Token* origin = nullptr);
 
@@ -203,6 +219,22 @@ struct ProgramMemoryState {
     FindChangedFn getCachedFindExpressionChanged(bool skipDeadCode) const;
 
     ProgramMemory get(const Token* tok, const Token* ctx, const ProgramMemory::Map& vars) const;
+
+private:
+    // Do the addState() of addStateLater()
+    void addPendingState() const;
+    // addState() without the pending addState(), it changes the mutable members
+    void addStateNow(const Token* tok, const ProgramMemory::Map& vars) const;
+    void replace(ProgramMemory pm, const Token* origin) const;
+
+    mutable const Token* pendingTok{};
+    mutable ProgramMemory::Map pendingVars;
+    // can the pending addState() read lifetime values
+    mutable bool pendingReadsLifetimeValues{};
+#ifndef NDEBUG
+    // the state and the origins that the pending addState() would have computed at once
+    mutable std::shared_ptr<std::pair<ProgramMemory, std::map<nonneg int, const Token*>>> pendingCheck;
+#endif
 };
 
 std::vector<ValueFlow::Value> execute(const Scope* scope, ProgramMemory& pm, const Settings& settings);

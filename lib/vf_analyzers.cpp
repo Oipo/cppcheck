@@ -790,17 +790,30 @@ private:
             makeConditional();
     }
 
+    // Is a lifetime value forwarded, its program memory is computed when it is used
+    virtual bool isLifetimeAnalysis() const {
+        return false;
+    }
+
     void updateState(const Token* tok) override
     {
         // Update program state
         pms.removeModifiedVars(tok);
-        pms.addState(tok, getProgramState());
+        // the program memory of a lifetime value is mostly not used, it is computed when it is used
+        if (isLifetimeAnalysis())
+            pms.addStateLater(tok, getProgramState());
+        else
+            pms.addState(tok, getProgramState());
     }
 
     void update(Token* tok, Action a, Direction d) override {
         ValueFlow::Value* value = getValue(tok);
         if (!value)
             return;
+        // the program memory of a lifetime analysis is computed later, from the values of the tokens
+        // up to its token
+        if (isLifetimeAnalysis())
+            pms.beforeSetLifetimeValue(tok);
         ValueFlow::Value localValue;
         if (a.isSymbolicMatch()) {
             // Make a copy of the value to modify it
@@ -1167,6 +1180,11 @@ struct SingleValueFlowAnalyzer : ValueFlowAnalyzer {
         if (value.isLifetimeValue())
             return false;
         return true;
+    }
+
+    bool isLifetimeAnalysis() const override
+    {
+        return value.isLifetimeValue();
     }
 
     void addErrorPath(const Token* tok, const std::string& s) override {

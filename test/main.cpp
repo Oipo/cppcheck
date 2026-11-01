@@ -19,6 +19,7 @@
 #include "color.h"
 #include "options.h"
 #include "preprocessor.h"
+#include "programmemory.h"
 #include "fixture.h"
 
 #include <cstdlib>
@@ -28,6 +29,7 @@ int main(int argc, char *argv[])
 {
     Preprocessor::macroChar = '$';     // While macroChar is char(1) per default outside test suite, we require it to be a human-readable character here.
     gDisableColors = true;
+    ProgramMemoryState::compareDeferredStates = true; // Check that the deferred program memory of a lifetime analysis is the same as the immediate one.
 
     options args(argc, argv);
 
